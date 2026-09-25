@@ -52,14 +52,14 @@ Extensión de **Forge Neo** (formato WebUI estándar) que, a partir de una image
 |-------|----------|
 | Host | Forge Neo / A1111-compatible extension loader |
 | Lenguaje | Python 3 (el del runtime Forge) |
-| UI | Gradio + `modules.scripts.Script` / `InputAccordion` |
-| Layout | Extensión WebUI clásica: raíz con `scripts/`, paquete Python importable, `README.md` |
-| Distribución | Repo git clonable / Install from URL; opcionalmente también semilla en `docker-neo/extensions/` |
+| UI | Gradio + `script_callbacks.on_ui_tabs` |
+| Layout | Extensión WebUI clásica en repo dedicado |
+| Distribución | Repo propio [`pcgarat/sd-forge-img2prompt`](https://github.com/pcgarat/sd-forge-img2prompt) — Install from URL / `git clone` en `EXTENSIONS_PATH` |
 | Persistencia | Ninguna en v1 (sin DB, sin files de caché obligatorios) |
 | Backend visión/LLM | **No** en v1; interfaz preparada (`PromptProvider`) |
-| `install.py` | Solo si hace falta; v1 **sin** deps extra (usa Gradio/PIL/`modules` ya presentes). Si aparece `install.py`, debe ser no-op o mínimo — esta imagen usa `--skip-install` |
+| `install.py` | **No** en v1 — compatible con docker-neo `--skip-install` |
 
-Referencia de prompting Krea 2 / FLUX prosa: `guia_img_prompts.md` (principios de prosa natural; perfil Krea 2 prioriza detalle de composición/luz/materiales y texto entre comillas).
+Referencia de prompting Krea 2 / FLUX prosa: `guia_img_prompts.md` en docker-neo (principios de prosa natural; perfil Krea 2 prioriza detalle de composición/luz/materiales y texto entre comillas).
 
 ---
 
@@ -68,67 +68,45 @@ Referencia de prompting Krea 2 / FLUX prosa: `guia_img_prompts.md` (principios d
 **Instalar (Forge Neo / host o contenedor):**
 
 ```bash
-# Opción A — UI: Extensions → Install from URL → pegar URL del repo git → Install → Apply and restart UI
+# Opción A — UI: Extensions → Install from URL
+# https://github.com/pcgarat/sd-forge-img2prompt
 
-# Opción B — CLI en EXTENSIONS_PATH (ej. /data/extensions o forge-data/extensions)
-git clone <URL_DEL_REPO> sd-forge-img2prompt
-# Luego Apply and restart UI (o reiniciar el contenedor)
+# Opción B — CLI
+git clone https://github.com/pcgarat/sd-forge-img2prompt.git "$EXTENSIONS_PATH/sd-forge-img2prompt"
+# Luego Apply and restart UI (o make restart)
 ```
 
-**Desarrollo en monorepo `docker-neo` (opcional):** el código puede vivir en `extensions/sd-forge-img2prompt/` como semilla que `make up` copia **solo si falta** la carpeta en `EXTENSIONS_PATH` (mismo patrón Moodboard). Eso no sustituye el flujo Install from URL.
+**Desarrollo:** en el repo de la extensión (no como copia permanente en `docker-neo/extensions/`).
 
 ```bash
-make up
-make shell
-```
-
-Tests unitarios (sin levantar WebUI):
-
-```bash
-python -m pytest extensions/sd-forge-img2prompt/tests -q
-# o, si el cwd es la raíz de la extensión:
+cd /path/to/sd-forge-img2prompt
 python -m pytest tests -q
-```
-
-Lint (Ask first si el repo aún no lo usa ahí):
-
-```bash
-ruff check extensions/sd-forge-img2prompt
 ```
 
 ---
 
 ## Project Structure
 
-Raíz de la extensión = lo que Forge clona en `extensions/sd-forge-img2prompt/`:
-
 ```text
-sd-forge-img2prompt/          # raíz instalable (git root de la extensión)
-  README.md                   # Install from URL + uso v1 + cómo enchufar provider
-  metadata.ini                # opcional; si el ecosistema Neo lo usa, incluirlo
+# https://github.com/pcgarat/sd-forge-img2prompt
+sd-forge-img2prompt/
+  README.md
+  metadata.ini
+  LICENSE
   scripts/
-    img2prompt.py             # Script Gradio (UI + callbacks) — requerido por el loader
+    img2prompt.py             # on_ui_tabs + paste_params
   forge_img2prompt/
     __init__.py
-    stack.py                  # Detección Krea 2 / turbo|RAW / TE
-    profiles/
-      __init__.py
-      base.py                 # Protocolo Profile + PromptRequest/Result
-      krea2.py                # Perfil Krea 2 (prosa, hints steps/CFG)
-    providers/
-      __init__.py
-      base.py                 # Protocolo PromptProvider
-      stub.py                 # Stub v1 (sin backend)
+    stack.py
+    provider.py               # Protocol + StubProvider
   tests/
     test_stack.py
     test_stub_provider.py
-    test_krea2_profile.py
 
-# En docker-neo (doc del producto, no parte del zip/clone de la extensión):
+# Spec / plan del producto viven en docker-neo:
 docker-neo/docs/spec-forge-neo-img2prompt_25-09-2026.md
+docker-neo/tasks/plan.md
 ```
-
-Importante: `scripts/*.py` debe poder importar `forge_img2prompt` con la raíz de la extensión en `sys.path` (comportamiento habitual del loader; si hace falta un ajuste mínimo en el script, documentarlo).
 
 ---
 
@@ -197,13 +175,13 @@ Cobertura: no hay umbral numérico; sí deben pasar todos los unit tests del paq
 - Fecha en docs nuevos según convención del repo.
 
 **Ask first**
-- Publicar repo git aparte vs solo carpeta en `docker-neo/extensions/`.
-- Añadir la extensión al seed de `make up` / target `make` de refresh.
+- Target `make` en docker-neo para clonar/actualizar `sd-forge-img2prompt`.
 - Meterla en `builtin-extensions/` (imagen) — por defecto **no**.
 - Añadir dependencias Python / `install.py` no vacío.
 - Auto-aplicar steps/CFG/sampler (v1 solo hints).
 - Soporte Klein u otras familias.
 - Implementar provider real (local VL o API).
+- AlwaysVisible en lugar de pestaña (si se prioriza cero cambio de tab).
 
 **Never**
 - Enviar imágenes a APIs sin decisión explícita.
@@ -232,22 +210,20 @@ Cobertura: no hay umbral numérico; sí deben pasar todos los unit tests del paq
 
 ## Open Questions
 
-- ¿Repo git propio (URL pública/privada) en v1, o primero solo carpeta en `docker-neo/extensions/` lista para clonar/copiar, y el remoto después? **Default propuesto:** estructura instalable desde el día 1; remoto Ask first.
-
 Pendientes diferidos (post-v1):
 
 - ¿Provider local reutilizando Qwen3-VL cargado vs API?
 - ¿Auto-aplicar preset `krea2` (sampler/steps/CFG)?
 - Perfil Klein 9B (misma prosa, TE Qwen3-8B, 4 steps distilled).
+- Target `make` en docker-neo para clonar/actualizar la extensión (Ask first).
 
 ---
 
 ## Assumptions (revisión humana)
 
-1. Es una **extensión WebUI estándar** (Install from URL / clone en `extensions/`), no app en `tools/` ni builtin de imagen.
-2. Puede además sembrarse desde `docker-neo/extensions/` como Moodboard, pero eso es opcional; el camino canónico es el del gestor de extensiones.
+1. Código canónico en **https://github.com/pcgarat/sd-forge-img2prompt** (no seed en `docker-neo/extensions/`).
+2. Extensión WebUI estándar (Install from URL / clone en `extensions/`).
 3. “Sin backend” = sin servicio/VL/API; el stub **sí** puede transformar `user_notes` + perfil Krea 2 en prosa usable.
-4. Clipboard = pegar en el `gr.Image` del navegador; no API nativa del OS.
-5. Detección Krea 2 por heurística de nombres de checkpoint/TE (p. ej. `krea`, `qwen3vl`); no hace falta leer arquitectura del state dict en v1.
+4. Clipboard = pegar en el `gr.Image` del navegador.
+5. Detección Krea 2 por heurística de nombres de checkpoint/TE.
 6. Nombre de carpeta: `sd-forge-img2prompt`.
-→ Corrige ahora o aprueba el spec actualizado.
