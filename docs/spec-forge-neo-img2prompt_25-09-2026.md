@@ -1,4 +1,4 @@
-# Última modificación: 2026-09-25
+# Última modificación: 2026-09-26
 
 # Spec: Forge Neo — Image → Prompt (Krea 2 v1)
 
@@ -26,7 +26,7 @@ Mecanismo heredado de A1111 / Forge Classic (`Haoming02/sd-webui-forge-classic` 
 - CLI: `git clone <url> $EXTENSIONS_PATH/<nombre>`.
 - En `docker-neo`: `make seed-extensions` / `make up` copia `repo/extensions/*` → `EXTENSIONS_PATH` **solo si no existe**; la imagen arranca con **`--skip-install`**, así que deps de `install.py` **no** se instalan en runtime — hay que hornearlas en la imagen o no depender de ellas.
 
-**Decisión v1 (este spec):** forma (1) AlwaysVisible, sin `install.py`, sin deps extra. No forkear Adeliox (carga VL propio + estilos tag-soup; distinto objetivo). Rellenar el prompt del tab activo con JS Gradio (`#txt2img_prompt` / `#img2img_prompt`), patrón send-to ya usado en el ecosistema Neo.
+**Decisión v1 (revisada con skill forge-neo-extensions):** forma (2) **`on_ui_tabs`**, sin `install.py`, sin deps extra. Motivo: es una *tool* (no hook `process`); el stack se lee de `shared` al generar; el send-to idiomático en Neo es `modules.infotext_utils.register_paste_params_button`. AlwaysVisible queda como alternativa solo si se prioriza cero cambio de pestaña. No forkear Adeliox (VL propio + tag-soup; distinto objetivo).
 
 ---
 

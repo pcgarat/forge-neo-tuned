@@ -1,135 +1,79 @@
-# Última modificación: 2026-09-25
+# Última modificación: 2026-09-26
 
-# Todo: sd-forge-img2prompt
+# Todo: sd-forge-img2prompt (revisado)
 
-## Task 1: Esqueleto instalable + contratos
+## Task 1: Esqueleto + stack + stub (núcleo testeable)
 
-**Description:** Crear `extensions/sd-forge-img2prompt/` con layout WebUI (`scripts/`, `forge_img2prompt/`, `tests/`, `README.md`, opcional `metadata.ini`). Definir dataclasses/`Protocol` de stack, request/result y provider.
+**Description:** Crear `extensions/sd-forge-img2prompt/` instalable. Paquete slim: `stack.py`, `provider.py` (Protocol + StubProvider con prosa Krea2). Tests sin Forge.
 
 **Acceptance criteria:**
-- [ ] Carpeta válida para seed / clone en `extensions/`
-- [ ] Contratos importables sin Forge (`forge_img2prompt.profiles.base`, `providers.base`)
-- [ ] README con Install from URL / clone / seed docker-neo
+- [ ] Layout: `scripts/`, `forge_img2prompt/`, `tests/`, `README.md` (Install from URL / clone / seed)
+- [ ] `detect_stack(checkpoint, text_encoder) → StackInfo`
+- [ ] Stub: notes → prosa; sin notes → plantilla mínima; hints Turbo/RAW; no tag-soup
+- [ ] `is_supported` solo Krea2
 
 **Verification:**
-- [ ] `python -c "from forge_img2prompt.providers.base import PromptProvider"` desde la raíz de la extensión (o pytest vacío verde)
-- [ ] Manual: layout coincide con Moodboard/Depth (scripts + paquete)
+- [ ] `python -m pytest extensions/sd-forge-img2prompt/tests -q`
 
 **Dependencies:** None
 
-**Files likely touched:**
-- `extensions/sd-forge-img2prompt/README.md`
-- `extensions/sd-forge-img2prompt/metadata.ini` (opcional)
-- `extensions/sd-forge-img2prompt/forge_img2prompt/**/*.py`
-- `extensions/sd-forge-img2prompt/scripts/.gitkeep` o stub mínimo
+**Files:** `extensions/sd-forge-img2prompt/**`
 
-**Estimated scope:** Medium
+**Scope:** Medium
 
 ---
 
-## Task 2: Detección de stack Krea 2
+## Task 2: Pestaña UI + paste_params
 
-**Description:** Heurística por nombres de checkpoint y text encoder → `StackInfo` (`krea2`/`unknown`, `turbo`/`raw`/`unknown`).
+**Description:** `scripts/img2prompt.py` con `on_ui_tabs`: imagen, notes, status stack, Generate, prompt out, botones Send a txt2img/img2img vía `modules.infotext_utils`. Leer stack real de `shared`/`sd_models` en el click. Sin `install.py`. Guardar `EXT_DIR = scripts.basedir()` en import si hace falta.
 
 **Acceptance criteria:**
-- [ ] Detecta variantes tipicas (`krea`, `krea2`, `turbo`, `raw`, `qwen3vl`)
-- [ ] `is_supported` solo true para familia krea2
-- [ ] Tests unitarios con nombres sintéticos
+- [ ] Pestaña visible tras restart
+- [ ] Generate rellena el textbox de salida
+- [ ] Send escribe en el prompt del tab destino (o copy fallback documentado)
+- [ ] Stack no-Krea2 → aviso claro
 
 **Verification:**
-- [ ] `python -m pytest extensions/sd-forge-img2prompt/tests/test_stack.py -q`
+- [ ] Manual smoke Forge Neo
+- [ ] Tests Task 1 siguen verdes
 
 **Dependencies:** Task 1
 
-**Files likely touched:**
-- `extensions/sd-forge-img2prompt/forge_img2prompt/stack.py`
-- `extensions/sd-forge-img2prompt/tests/test_stack.py`
+**Files:** `extensions/sd-forge-img2prompt/scripts/img2prompt.py`, README
 
-**Estimated scope:** Small
+**Scope:** Medium
 
 ---
 
-## Task 3: Perfil Krea 2 + StubProvider
+## Checkpoint: After Tasks 1–2
 
-**Description:** Perfil de prosa (orden sujeto→entorno→luz→estilo; comillas para texto) y hints Turbo (~8 steps, CFG bajo) vs RAW (~28 steps, CFG ~4.5). Stub reescribe `user_notes` o plantilla mínima; no tag-soup.
+- [ ] Extensión cargable por seed/clone
+- [ ] Flujo imagen + notes → prompt → Send txt2img con Krea2
+
+---
+
+## Task 3: Docs seed docker-neo
+
+**Description:** Entrada en `extensions/README.md`. No builtin, no Dockerfile.
 
 **Acceptance criteria:**
-- [ ] Con notes → prosa usable en inglés (estándar Krea prompting)
-- [ ] Sin notes → prompt mínimo explícito / placeholder útil
-- [ ] `sampler_hints` y aviso de negativo en turbo
-- [ ] Tests sin Forge
+- [ ] Listada como extensión custom sembrable
+- [ ] Spec/plan alineados (UI = on_ui_tabs)
 
 **Verification:**
-- [ ] `python -m pytest extensions/sd-forge-img2prompt/tests/test_stub_provider.py tests/test_krea2_profile.py -q`
+- [ ] `make seed-extensions` copia si falta
 
-**Dependencies:** Task 1–2
+**Dependencies:** Task 2
 
-**Files likely touched:**
-- `extensions/sd-forge-img2prompt/forge_img2prompt/profiles/krea2.py`
-- `extensions/sd-forge-img2prompt/forge_img2prompt/providers/stub.py`
-- `extensions/sd-forge-img2prompt/tests/test_*.py`
+**Files:** `extensions/README.md`, sync mínimo en spec si hace falta
 
-**Estimated scope:** Medium
+**Scope:** Small
 
 ---
 
-## Task 4: Script Gradio AlwaysVisible
+## Fuera de ciclo
 
-**Description:** Accordion Image → Prompt: imagen (upload/clipboard), notes, estado de stack, Generate, Apply to prompt (JS), hints. Lee checkpoint/TE vía `shared`/`sd_models` como el resto de Neo.
-
-**Acceptance criteria:**
-- [ ] Visible en txt2img (y img2img)
-- [ ] Generate → texto en UI + opción de volcar a `#txt2img_prompt` / `#img2img_prompt`
-- [ ] Stack no-Krea2 → aviso, no finge optimización
-- [ ] Sin `install.py`; imports de `forge_img2prompt` OK
-
-**Verification:**
-- [ ] Manual en Forge Neo tras seed/restart
-- [ ] Unit tests previos siguen pasando
-
-**Dependencies:** Task 1–3
-
-**Files likely touched:**
-- `extensions/sd-forge-img2prompt/scripts/img2prompt.py`
-
-**Estimated scope:** Medium
-
----
-
-## Checkpoint: After Tasks 1–4
-
-- [ ] pytest del paquete verde
-- [ ] Extensión carga en Forge Neo
-- [ ] Flujo imagen + notes → prompt en textbox con Krea2
-
----
-
-## Task 5: Integración docs / seed docker-neo
-
-**Description:** Listar la extensión en `extensions/README.md`; confirmar que entra en `make seed-extensions`. No meter en builtin ni cambiar Dockerfile.
-
-**Acceptance criteria:**
-- [ ] Documentada en `extensions/README.md`
-- [ ] Spec/plan referenciados si aplica
-- [ ] Sin cambios de imagen Docker
-
-**Verification:**
-- [ ] `make seed-extensions` copia `sd-forge-img2prompt` en destino limpio (o skip si ya existe)
-
-**Dependencies:** Task 4
-
-**Files likely touched:**
-- `extensions/README.md`
-- posiblemente nota corta en README raíz (Ask first si enreda)
-
-**Estimated scope:** Small
-
----
-
-## Fuera de este ciclo
-
-- Provider VL/API real
-- Perfil Klein 9B
-- Auto-aplicar sampler/CFG
-- Repo git aparte (Ask first)
-- Target `make img2prompt-ext` de refresh forzado
+- AlwaysVisible (solo si se pide explícitamente)
+- Provider VL/API, perfil Klein, auto sampler/CFG
+- Repo git aparte / `make img2prompt-ext`
+- JS custom salvo que `infotext_utils` falle en smoke
