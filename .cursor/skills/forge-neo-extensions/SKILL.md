@@ -183,7 +183,7 @@ Lista ampliada: [reference.md](reference.md).
 
 ## Referencias del repo
 
-- Spec img2prompt (hallazgos loader): `docs/spec-forge-neo-img2prompt_25-09-2026.md`
+- Spec img2prompt (hallazgos loader): repo hermano `sd-forge-img2prompt` → `docs/spec-forge-neo-img2prompt_25-09-2026.md`
 - Seed custom: `extensions/README.md`
 - Builtins: `builtin-extensions/README.md`
 - Ejemplos vivos: Moodboard, Identity Edit, Depth, IIB, CivitAI Browser Neo

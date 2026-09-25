@@ -18,6 +18,8 @@ services:
     volumes:
       - ${DATA_PATH:-/workspace/forge-data}:/data
       - ${EXTENSIONS_PATH:-/workspace/forge-data/extensions}:/data/extensions
+      # Desarrollo local de sd-forge-img2prompt (repo hermano; override sobre EXTENSIONS_PATH).
+      - ${IMG2PROMPT_EXT_PATH:-../sd-forge-img2prompt}:/data/extensions/sd-forge-img2prompt
       # Entrypoint con drop de privilegios (sin rebuild de imagen).
       - ./entrypoint.sh:/entrypoint.sh:ro
     environment:
