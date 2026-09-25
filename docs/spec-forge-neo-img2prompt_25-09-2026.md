@@ -134,10 +134,10 @@ Importante: `scripts/*.py` debe poder importar `forge_img2prompt` con la raíz d
 
 ## Code Style
 
-- Extensión como las existentes: imports desde `modules.*`, accordion AlwaysVisible, `elem_id` con prefijo estable.
-- Comentarios solo si hay complejidad no obvia.
+- Extensión como las Neo con pestaña propia: `script_callbacks.on_ui_tabs`, `analytics_enabled=False`.
 - Nombres en inglés en código; UI y docs de usuario en español.
-- Sin lógica de prompt acoplada a Gradio: UI → `PromptRequest` → `PromptProvider` → `PromptResult` → rellenar textbox.
+- Sin lógica de prompt acoplada a Gradio: UI → `PromptRequest` → `PromptProvider` → `PromptResult` → textbox + paste_params.
+- Send-to: `modules.infotext_utils` (no `generation_parameters_copypaste`). Guardar `scripts.basedir()` en import si se necesitan paths.
 
 Ejemplo de contrato (ilustrativo):
 
@@ -218,13 +218,13 @@ Cobertura: no hay umbral numérico; sí deben pasar todos los unit tests del paq
 
 1. Se puede instalar con **Extensions → Install from URL** (o `git clone` en `extensions/`) y aparece tras **Apply and restart UI**, sin pasos Docker especiales.
 2. Layout válido de extensión WebUI (`scripts/` + paquete; sin deps extra en v1).
-3. Extensión visible en txt2img (y opcionalmente img2img) como accordion **Image → Prompt**.
+3. Pestaña top-level **Image → Prompt** visible tras Apply and restart UI.
 4. Acepta imagen por upload y por pegado en el control de imagen Gradio.
 5. Campo opcional **notas / descripción** del usuario.
-6. Con checkpoint/TE reconocibles como Krea 2, el botón genera un prompt y lo escribe en el textbox positivo de la pestaña activa.
+6. Con checkpoint/TE reconocibles como Krea 2, Generate produce prosa y Send a txt2img/img2img la vuelca vía `infotext_utils` (o copy fallback).
 7. Muestra hints de sampler (Turbo ≈ 8 steps / CFG bajo; RAW ≈ más steps / CFG ~4.5) sin mutar settings.
 8. Si el stack no es Krea 2, UI avisa y no promete prompt “optimizado”.
-9. Existe `PromptProvider` + `StubProvider`; cambiar de provider no exige reescribir la UI.
+9. Existe `PromptProvider` + stub; cambiar de provider no exige reescribir la UI.
 10. `pytest` de `tests/` pasa sin levantar Forge.
 11. README documenta Install from URL, uso v1 y el punto de extensión del provider.
 
