@@ -2,6 +2,34 @@
 
 # Spec: Forge Neo — Image → Prompt (Krea 2 v1)
 
+## Forge Neo — cómo se crea una extensión (hallazgos)
+
+Mecanismo heredado de A1111 / Forge Classic (`Haoming02/sd-webui-forge-classic` rama `neo`):
+
+| Pieza | Rol |
+|-------|-----|
+| Carpeta en `extensions/` o `extensions-builtin/` | Unidad instalable; el nombre de carpeta es el id por defecto |
+| `scripts/*.py` | El loader importa todo lo que hay aquí. Suele contener una subclase de `modules.scripts.Script` **o** registrar `script_callbacks` |
+| Paquete hermano en la raíz (p. ej. `forge_krea2_depth/`) | Lógica fuera del script; patrón usado por Depth ControlNet en este repo |
+| `install.py` (raíz) | Se ejecuta al arranque vía `run_extension_installer` **salvo** `--skip-install` |
+| `metadata.ini` | Opcional: `Name`, orden `Before`/`After` entre extensiones |
+| `javascript/`, `style.css`, `preload.py` | Opcionales |
+
+**Dos formas de UI:**
+
+1. **`scripts.Script` + `show() → AlwaysVisible`** — accordion dentro de txt2img/img2img (Moodboard, Identity Edit, Depth). Ideal si necesitas el **stack ya seleccionado** en esa pestaña.
+2. **`script_callbacks.on_ui_tabs`** — pestaña top-level propia (p. ej. [Adeliox/forge-neo-image2prompt](https://github.com/Adeliox/forge-neo-image2prompt)). Mejor para tools pesados de VRAM; el “send to prompt” suele hacerse con JS sobre `#txt2img_prompt textarea`.
+
+**Instalación en la práctica:**
+
+- UI: Extensions → Install from URL (repo git) → Apply and restart UI.
+- CLI: `git clone <url> $EXTENSIONS_PATH/<nombre>`.
+- En `docker-neo`: `make seed-extensions` / `make up` copia `repo/extensions/*` → `EXTENSIONS_PATH` **solo si no existe**; la imagen arranca con **`--skip-install`**, así que deps de `install.py` **no** se instalan en runtime — hay que hornearlas en la imagen o no depender de ellas.
+
+**Decisión v1 (este spec):** forma (1) AlwaysVisible, sin `install.py`, sin deps extra. No forkear Adeliox (carga VL propio + estilos tag-soup; distinto objetivo). Rellenar el prompt del tab activo con JS Gradio (`#txt2img_prompt` / `#img2img_prompt`), patrón send-to ya usado en el ecosistema Neo.
+
+---
+
 ## Objective
 
 Extensión de **Forge Neo** (formato WebUI estándar) que, a partir de una imagen (upload o pegado desde portapapeles en el control Gradio), produce un **prompt en prosa** listo para pegar en txt2img, afinado al stack **Krea 2** actualmente seleccionado (checkpoint + text encoder + turbo vs RAW).
