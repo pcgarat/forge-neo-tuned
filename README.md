@@ -109,6 +109,7 @@ Guía: [docs/integracion-krea2-moodboard-identity-edit-forge-neo_23-07-2026.md](
 | `make lowvram` / `make wan` | 8 GB / 8 GB + INT8 |
 | `make ck` / `make sage` | Atención INT8 (Comfy-Kitchen) / SageAttention fp16 (requiere `make build-sage`); `sage-triton` para el kernel Triton |
 | `make bench-attn` / `bench-attn-sweep` | Medir backends de atención (misma semilla) → informe md |
+| `make bench-offload` / `bench-offload-sweep` | Medir trasiego de pesos RAM↔VRAM (`--cuda-stream` on/off) → informe md |
 | `make chatbot` | Warmup `torch.compile` para API |
 | `make iib-access` | Permisos IIB a salidas |
 | `make reactor-fix` | Reafirma ORT-GPU en contenedor vivo |
@@ -139,6 +140,7 @@ Pod = esta imagen; volumen en `/workspace` → datos en `/workspace/forge-data`;
 | [Krea 2 integración](docs/integracion-krea2-moodboard-identity-edit-forge-neo_23-07-2026.md) | Diseño del toolkit en esta stack |
 | [Scripts txt2img](docs/guia-scripts-txt2img_23-09-2026.md) | Never OOM, Torch Compile, Depth… en 8 GB |
 | [Backends de atención](docs/attention-backends_09-10-2026.md) | Opciones, riesgos en sm89 y cómo medir |
+| [Offload RAM↔VRAM](docs/bench-offload_09-10-2026.md) | Trasiego de pesos: `--cuda-stream`, pinning y cómo medir |
 | [Planteamiento](docs/planteamiento-docker-forge-neo_28-02-2025.md) | Arquitectura de imagen |
 | [models.md](models.md) | Layout de modelos |
 | [`builtin-extensions/`](builtin-extensions/) · [`extensions/`](extensions/) | Qué va en imagen vs volumen |

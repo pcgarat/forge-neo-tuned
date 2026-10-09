@@ -17,7 +17,10 @@ GITHUB_USER ?= pcgarat
 
 # Perfil GPU ≤12 GB (p. ej. RTX 4060 8 GB): Klein 9B, Flux, Qwen y modelos grandes.
 # cuda-malloc + lowvram + fp8 + offload RAM. Sin --fast-fp8 (falla en Krea2 y solo ralentiza).
-ARGS_8GB = --cuda-malloc --lowvram --fp8_e4m3fn-unet --reserve-vram 2 --pin-shared-memory --mmap-torch-files
+# cuda-stream solapa la subida de pesos con el cómputo (hilos de offload); con lowvram el
+# cuello es el trasiego RAM↔VRAM, no el cálculo. El pinning solo aplica con memlock holgado
+# (ver docker-compose.yml). Medir con `make bench-offload`.
+ARGS_8GB = --cuda-malloc --lowvram --fp8_e4m3fn-unet --reserve-vram 2 --cuda-stream --pin-shared-memory --mmap-torch-files
 
 # Perfil 8 GB + atención INT8 (Comfy-Kitchen), que sustituye a flash_attn.
 # Solo rinde cuando la secuencia de atención es larga: vídeo (Wan) y alta resolución.
@@ -37,7 +40,7 @@ ARGS_SAGE_TRITON = $(ARGS_8GB) --sage-function fp16_triton
 FORGE_IMAGE ?= forge-neo:latest
 FORGE_IMAGE_SAGE ?= forge-neo:sage
 
-.PHONY: help build build-no-cache build-cuda12 build-slim build-sage push push-cuda12 push-slim push-sage up down restart logs shell workspace preflight-gpu preflight-gpu-check seed-extensions ps clean klein9b lowvram wan ck sage sage-triton chatbot chatbot-warmup test-warmup bench-attn bench-attn-sweep bench-attn-flash bench-attn-ck bench-attn-sage bench-attn-sage-triton test-bench iib-access krea2-ext krea2-depth-ext reactor-fix install-docker
+.PHONY: help build build-no-cache build-cuda12 build-slim build-sage push push-cuda12 push-slim push-sage up down restart logs shell workspace preflight-gpu preflight-gpu-check seed-extensions ps clean klein9b lowvram wan ck sage sage-triton chatbot chatbot-warmup test-warmup bench-attn bench-attn-sweep bench-attn-flash bench-attn-ck bench-attn-sage bench-attn-sage-triton test-bench bench-offload bench-offload-sweep bench-offload-sweep-nostream bench-offload-sweep-stream test-bench-offload iib-access krea2-ext krea2-depth-ext reactor-fix install-docker
 
 help:
 	@echo "sd-webui-forge-neo — objetivos disponibles:"
@@ -61,6 +64,9 @@ help:
 	@echo "  make bench-attn-sage — Mide SageAttention fp16_cuda (requiere 'make build-sage')"
 	@echo "  make bench-attn-sage-triton — Mide SageAttention fp16_triton"
 	@echo "  make test-bench    — Tests del benchmark de atención"
+	@echo "  make bench-offload — Medir it/s vs resolución y MB descargados del perfil activo"
+	@echo "  make bench-offload-sweep — Comparar con --cuda-stream vs sin él (requiere GPU)"
+	@echo "  make test-bench-offload — Tests del benchmark de offload"
 	@echo "  make logs          — Ver logs del servicio (Ctrl+C para salir)"
 	@echo "  make shell         — Abrir una shell dentro del contenedor"
 	@echo "  make workspace     — Crear árbol de datos y sembrar extensions/ si faltan (antes del primer up)"
@@ -236,6 +242,28 @@ bench-attn:
 test-bench:
 	python3 -m unittest tests.test_bench_attn -v
 
+# --- Benchmark de trasiego de pesos (offload RAM<->VRAM) --------------------
+# Mide la curva it/s vs resolución del perfil activo y anexa un bloque por perfil.
+# Si el modelo cabe entero en VRAM no hay líneas de offload: fuerza lowvram para medir.
+BENCH_OFFLOAD_ARGS   ?= --sizes 768x768,1024x1024,1280x1280 --steps 8 --runs 3
+BENCH_OFFLOAD_REPORT ?= docs/bench-offload_09-10-2026.md
+# Perfil equivalente al 8GB sin el offload asíncrono, para aislar el efecto de --cuda-stream.
+ARGS_8GB_NOSTREAM = $(filter-out --cuda-stream,$(ARGS_8GB))
+
+bench-offload:
+	@$(ENV_LOAD); \
+	data="$${DATA_PATH:-/workspace/forge-data}"; \
+	python3 "$(CURDIR)/scripts/bench_offload.py" \
+	  --data-path "$$data" \
+	  --base-url "http://127.0.0.1:$(PORT)" \
+	  --container "$(SERVICE)" \
+	  --out "$(CURDIR)/$(BENCH_OFFLOAD_REPORT)" \
+	  --label "$${BENCH_OFFLOAD_LABEL:-active}" \
+	  $(BENCH_OFFLOAD_ARGS)
+
+test-bench-offload:
+	python3 -m unittest tests.test_bench_offload -v
+
 # Compara base (flash) vs CK INT8. Requiere GPU operativa (nvidia-smi). Intervalo configurable.
 BENCH_SLEEP ?= 30
 bench-attn-sweep: bench-attn-flash bench-attn-ck
@@ -259,6 +287,24 @@ bench-attn-sage-triton: build-sage
 	@$(MAKE) --no-print-directory sage-triton BENCH_DETACH=1
 	@sleep $(BENCH_SLEEP)
 	@$(MAKE) --no-print-directory bench-attn BENCH_ARGS="$(BENCH_ARGS) --label sage-fp16_triton"
+
+# Compara el 8GB con offload asíncrono (--cuda-stream) frente a sin él. Reinicia entre ambos.
+BENCH_OFFLOAD_SLEEP ?= 30
+bench-offload-sweep: bench-offload-sweep-nostream bench-offload-sweep-stream
+
+bench-offload-sweep-nostream:
+	@$(MAKE) --no-print-directory preflight-gpu
+	@echo "Perfil 8GB sin --cuda-stream: $(ARGS_8GB_NOSTREAM)"
+	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_8GB_NOSTREAM)" && $(COMPOSE) up -d
+	@sleep $(BENCH_OFFLOAD_SLEEP)
+	@$(MAKE) --no-print-directory bench-offload BENCH_OFFLOAD_LABEL="8gb-nostream"
+
+bench-offload-sweep-stream:
+	@$(MAKE) --no-print-directory preflight-gpu
+	@echo "Perfil 8GB con --cuda-stream: $(ARGS_8GB)"
+	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_8GB)" && $(COMPOSE) up -d
+	@sleep $(BENCH_OFFLOAD_SLEEP)
+	@$(MAKE) --no-print-directory bench-offload BENCH_OFFLOAD_LABEL="8gb-stream"
 
 logs:
 	$(COMPOSE) logs -f $(SERVICE)
