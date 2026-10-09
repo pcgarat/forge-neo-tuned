@@ -6,6 +6,7 @@ from uuid import uuid4
 from typing import List
 from collections import defaultdict
 from datetime import datetime, timedelta
+import traceback
 
 from modules import call_queue, shared, script_callbacks, scripts, ui_components
 from modules.shared import list_checkpoint_tiles, refresh_checkpoints
@@ -258,8 +259,12 @@ class Script(scripts.Script):
                         task_name=task_name,
                         request=request,
                     )
-                except:
-                     log.error("[ArtVenture] Possible taskID conflict. Please try enqueing again")
+                except Exception as e:
+                    log.error(
+                        f"[AgentScheduler] Failed to enqueue task {t_id}: "
+                        f"{type(e).__name__}: {e}"
+                    )
+                    log.error(traceback.format_exc())
 
             task_runner.execute_pending_tasks_threading()
 
@@ -614,8 +619,9 @@ def on_ui_tab(**_kwargs):
                         source_image_component=galerry,
                     )
                 )
-        except:
-            pass
+        except Exception as e:
+            log.error(f"[AgentScheduler] Could not register paste params buttons: {e}")
+            log.debug(traceback.format_exc())
 
     return [(scheduler_tab, "Agent Scheduler", "agent_scheduler")]
 
