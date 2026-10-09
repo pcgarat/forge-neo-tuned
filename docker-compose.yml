@@ -32,6 +32,13 @@ services:
       # Pisa env_file: así `make klein9b` / `make chatbot` pueden inyectar EXTRA_ARGS.
       - EXTRA_ARGS=${EXTRA_ARGS:-}
       - NVIDIA_VISIBLE_DEVICES=all
+    # --pin-shared-memory (cudaHostRegister) necesita memlock holgado: el default del
+    # contenedor son 8 MiB, así que el pinning falla en cuanto pasa de ahí y las copias
+    # H2D quedan pageable (sin DMA directo). Medir con `make bench-offload`.
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
     deploy:
       resources:
         reservations:
