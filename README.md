@@ -53,7 +53,7 @@ Con `--skip-install`, cada extensión no puede instalar lo suyo; se hornea a pro
 
 ### Operativa
 
-- Perfiles: `make klein9b` / `lowvram` / `wan` / `chatbot` (+ warmup compile)
+- Presets por modelo: `make klein` / `krea2` / `wan` (VRAM auto + atención recomendada) y `make run ATTN= VRAM=`
 - `PUID`/`PGID` + `setpriv` (output no queda root)
 - Layout único `forge-data/` local ↔ RunPod
 - Variantes `:cuda12` y `:slim` para hosts/RunPod restrictivos
@@ -105,14 +105,21 @@ Guía: [docs/integracion-krea2-moodboard-identity-edit-forge-neo_23-07-2026.md](
 
 | Comando | Uso |
 |---------|-----|
-| `make klein9b` | VRAM auto → high/normal/low |
-| `make lowvram` / `make wan` | 8 GB / 8 GB + INT8 |
-| `make ck` / `make sage` | Atención INT8 (Comfy-Kitchen) / SageAttention fp16 (requiere `make build-sage`); `sage-triton` para el kernel Triton |
+| `make klein` | Flux.2 Klein 9B turbo: VRAM auto + atención `flash` |
+| `make krea2` | Krea 2 turbo: VRAM auto + `flash` (prueba `ATTN=ck` a ≥1280 px) |
+| `make wan` | Wan 2.2 turbo (vídeo): VRAM auto + `ck` (INT8) |
+| `make run ATTN= VRAM=` | Arranque manual con los ejes a la carta (`ATTN=flash|ck|sage|sage-triton`, `VRAM=auto|8gb|normal|high`) |
+| `make up-interactive` | Asistente: pregunta modelo, tamaño, imagen/vídeo… y arranca con lo recomendado |
+| `make up` | Arranca con el `EXTRA_ARGS` del `.env`, sin ejes |
+| `make chatbot` | Perfil 8 GB + warmup `torch.compile` para API |
 | `make bench-attn` / `bench-attn-sweep` | Medir backends de atención (misma semilla) → informe md |
-| `make chatbot` | Warmup `torch.compile` para API |
+| `make bench-offload` / `bench-offload-sweep` | Medir trasiego de pesos RAM↔VRAM (`--cuda-stream` on/off) → informe md |
 | `make iib-access` | Permisos IIB a salidas |
 | `make reactor-fix` | Reafirma ORT-GPU en contenedor vivo |
 | `make seed-extensions` | Siembra `extensions/` si faltan |
+
+`ATTN=sage`/`sage-triton` exigen `make build-sage` antes (imagen `:sage`). `make help` agrupa todas
+las órdenes con su cuándo; detalle en [`docs/guia-perfiles_09-10-2026.md`](docs/guia-perfiles_09-10-2026.md).
 
 `.env`: `DATA_PATH`, `EXTENSIONS_PATH`, `PUID`/`PGID`, `EXTRA_ARGS`, subdirs de modelos. Tras cambios: `make restart`.
 
@@ -136,9 +143,11 @@ Pod = esta imagen; volumen en `/workspace` → datos en `/workspace/forge-data`;
 | Doc | Contenido |
 |-----|-----------|
 | [`patches/`](patches/) | Regeneración de patches Krea2 / Qwen3-VL |
+| [Guía de perfiles](docs/guia-perfiles_09-10-2026.md) | Qué orden usar por modelo (Klein / Krea 2 / Wan) y por qué |
 | [Krea 2 integración](docs/integracion-krea2-moodboard-identity-edit-forge-neo_23-07-2026.md) | Diseño del toolkit en esta stack |
 | [Scripts txt2img](docs/guia-scripts-txt2img_23-09-2026.md) | Never OOM, Torch Compile, Depth… en 8 GB |
 | [Backends de atención](docs/attention-backends_09-10-2026.md) | Opciones, riesgos en sm89 y cómo medir |
+| [Offload RAM↔VRAM](docs/bench-offload_09-10-2026.md) | Trasiego de pesos: `--cuda-stream`, pinning y cómo medir |
 | [Planteamiento](docs/planteamiento-docker-forge-neo_28-02-2025.md) | Arquitectura de imagen |
 | [models.md](models.md) | Layout de modelos |
 | [`builtin-extensions/`](builtin-extensions/) · [`extensions/`](extensions/) | Qué va en imagen vs volumen |
