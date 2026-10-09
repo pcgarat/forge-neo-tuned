@@ -1,9 +1,26 @@
-# sd-webui-forge-neo — objetivos para build y ejecución
-# Uso: make [objetivo]; make help
+# forge-neo — build, arranque y operación
+# Uso: make [target] [VAR=valor];  make help
 
 COMPOSE  = docker compose
 SERVICE  = forge-neo
 PORT     = 7860
+
+# --- Ejes de configuración de arranque --------------------------------------
+# ATTN: backend de atención.
+#   flash (def)  ya activo en la imagen; estable y bit-exacto.
+#   ck           Comfy-Kitchen INT8 (--use-ck-attention); rinde en secuencias
+#                largas (vídeo Wan, imagen >=1280 px). No bit-exacto.
+#   sage         SageAttention fp16_cuda; EXIGE `make build-sage`. Experimental en sm89.
+#   sage-triton  Sage por Triton; EXIGE `make build-sage`.
+# VRAM: perfil de memoria.
+#   auto (def)  detecta por nvidia-smi: >=20 GB highvram, >=12 GB normalvram, resto 8 GB.
+#   8gb         fuerza el perfil 8 GB (lowvram + offload asíncrono).
+#   normal|high fuerza normalvram / highvram.
+ATTN ?= flash
+VRAM ?= auto
+
+# STREAM=off quita --cuda-stream del perfil 8 GB (lo usa bench-offload-sweep).
+STREAM ?= on
 
 # Versiones para install-docker (repo estable de Docker). Vacío = última del repo.
 # Para fijar: DOCKER_CE_VERSION=5:29.2.1-1~ubuntu.24.04~noble (ejemplo Ubuntu 24.04).
@@ -15,82 +32,138 @@ REGISTRY_IMAGE ?= ghcr.io/$(GITHUB_USER)/forge-neo:latest
 REGISTRY_IMAGE_CUDA12 ?= ghcr.io/$(GITHUB_USER)/forge-neo:cuda12
 GITHUB_USER ?= pcgarat
 
-# Perfil GPU ≤12 GB (p. ej. RTX 4060 8 GB): Klein 9B, Flux, Qwen y modelos grandes.
+# Perfil GPU <=12 GB (p. ej. RTX 4060 8 GB): Klein 9B, Flux, Qwen y modelos grandes.
 # cuda-malloc + lowvram + fp8 + offload RAM. Sin --fast-fp8 (falla en Krea2 y solo ralentiza).
 # cuda-stream solapa la subida de pesos con el cómputo (hilos de offload); con lowvram el
-# cuello es el trasiego RAM↔VRAM, no el cálculo. El pinning solo aplica con memlock holgado
+# cuello es el trasiego RAM<->VRAM, no el cálculo. El pinning solo aplica con memlock holgado
 # (ver docker-compose.yml). Medir con `make bench-offload`.
 ARGS_8GB = --cuda-malloc --lowvram --fp8_e4m3fn-unet --reserve-vram 2 --cuda-stream --pin-shared-memory --mmap-torch-files
+# Sin offload asíncrono, para aislar su efecto en el benchmark.
+ARGS_8GB_NOSTREAM = $(filter-out --cuda-stream,$(ARGS_8GB))
+ARGS_8GB_SEL = $(if $(filter off,$(STREAM)),$(ARGS_8GB_NOSTREAM),$(ARGS_8GB))
+# Perfil >=12 GB: bf16 y sin offload de UNet. Igual para normal y high salvo el modo de VRAM.
+ARGS_NORMAL = --cuda-malloc --normalvram --bf16-unet --pin-shared-memory --mmap-torch-files
+ARGS_HIGH   = --cuda-malloc --highvram --bf16-unet --pin-shared-memory --mmap-torch-files
 
-# Perfil 8 GB + atención INT8 (Comfy-Kitchen), que sustituye a flash_attn.
-# Solo rinde cuando la secuencia de atención es larga: vídeo (Wan) y alta resolución.
-# Medido en Krea2 a 1280px: 26,3s → 21,9s; a 768px no hay diferencia medible.
-# Ojo: a igual semilla produce una imagen distinta, no es intercambiable a mitad de un trabajo.
-ARGS_INT8_ATTN = $(ARGS_8GB) --use-ck-attention
-
-# Perfil 8 GB + SageAttention forzado a FP16 (el path FP8 por defecto es inestable en sm89).
-# Requiere la imagen horneada con Sage (make build-sage); no basta con flags de runtime.
-# fp16_cuda usa los kernels CUDA precompilados (_qattn_sm89); fp16_triton usa los Triton.
-# Nota: Sage en sm89 no tiene kernel f16 con acumulador f16 -> `sageattn_qk_int8_pv_fp16_cuda`
-# con pv_accum_dtype="fp16" cae a `sm80_compile` en tiempo de import; puede fallar en sm89.
-ARGS_SAGE = $(ARGS_8GB) --sage-function fp16_cuda
-ARGS_SAGE_TRITON = $(ARGS_8GB) --sage-function fp16_triton
-
-# Imagen a arrancar: por defecto la estándar. `make sage` usa la variante con SageAttention.
+# Imagen a arrancar: la estándar, salvo Sage (variante horneada).
 FORGE_IMAGE ?= forge-neo:latest
 FORGE_IMAGE_SAGE ?= forge-neo:sage
 
-.PHONY: help build build-no-cache build-cuda12 build-slim build-sage push push-cuda12 push-slim push-sage up down restart logs shell workspace preflight-gpu preflight-gpu-check seed-extensions ps clean klein9b lowvram wan ck sage sage-triton chatbot chatbot-warmup test-warmup bench-attn bench-attn-sweep bench-attn-flash bench-attn-ck bench-attn-sage bench-attn-sage-triton test-bench bench-offload bench-offload-sweep bench-offload-sweep-nostream bench-offload-sweep-stream test-bench-offload iib-access krea2-ext krea2-depth-ext reactor-fix install-docker
+# ATTN -> flags de runtime. flash no añade flag (es el backend por defecto de la imagen).
+ATTN_FLAGS = $(strip $(if $(filter ck,$(ATTN)),--use-ck-attention,$(if $(filter sage,$(ATTN)),--sage-function fp16_cuda,$(if $(filter sage-triton,$(ATTN)),--sage-function fp16_triton,))))
+# ATTN -> imagen. Sage/sage-triton requieren el wheel horneado (make build-sage).
+ATTN_IMAGE = $(if $(filter sage sage-triton,$(ATTN)),$(FORGE_IMAGE_SAGE),$(FORGE_IMAGE))
+
+.PHONY: help build build-no-cache build-cuda12 build-slim build-sage push push-cuda12 push-slim push-sage \
+        run up down restart logs shell ps clean klein krea2 wan chatbot chatbot-warmup test-warmup \
+        workspace seed-extensions preflight-gpu preflight-gpu-check \
+        bench-attn bench-attn-sweep bench-attn-flash bench-attn-ck bench-attn-sage bench-attn-sage-triton test-bench \
+        bench-offload bench-offload-sweep bench-offload-sweep-nostream bench-offload-sweep-stream test-bench-offload \
+        iib-access krea2-ext krea2-depth-ext reactor-fix install-docker _launch-model
 
 help:
-	@echo "sd-webui-forge-neo — objetivos disponibles:"
+	@echo "forge-neo — make [target] [VAR=valor];  make help"
 	@echo ""
-	@echo "  make build         — Construir la imagen (primera vez o tras cambios)"
-	@echo "  make build-no-cache — Reconstruir sin caché (entrypoint, fixes config.json, etc.)"
-	@echo "  make up            — Arrancar el contenedor y seguir logs (Ctrl+C para salir)"
-	@echo "  make down          — Parar y eliminar el contenedor"
-	@echo "  make restart       — down + up y seguir logs (Ctrl+C para salir)"
-	@echo "  make klein9b       — Arrancar optimizado para Klein 9B y seguir logs (Ctrl+C para salir)"
-	@echo "  make lowvram       — Arrancar con perfil 8 GB y seguir logs (Ctrl+C para salir)"
-	@echo "  make wan           — Perfil 8 GB + atención INT8 de Comfy-Kitchen (vídeo Wan / alta resolución)"
-	@echo "  make ck            — Alias de 'make wan' (atención INT8 de Comfy-Kitchen, sin build)"
-	@echo "  make sage          — Perfil 8 GB + SageAttention fp16_cuda (requiere 'make build-sage' antes)"
-	@echo "  make sage-triton   — Igual que 'make sage' pero con el kernel Triton (fp16_triton)"
-	@echo "  make chatbot       — Perfil 8 GB + warmup torch.compile (guard_filter_fn) al size del último gen"
-	@echo "  make chatbot-warmup — Solo warmup (Forge ya tiene que estar arriba)"
-	@echo "  make test-warmup   — Tests del parser/payload de chatbot-warmup"
-	@echo "  make bench-attn    — Medir N gens (semilla fija) del backend activo y anexar fila al informe"
-	@echo "  make bench-attn-sweep — Comparar base (flash) vs CK INT8 reiniciando y midiendo (requiere GPU)"
-	@echo "  make bench-attn-sage — Mide SageAttention fp16_cuda (requiere 'make build-sage')"
-	@echo "  make bench-attn-sage-triton — Mide SageAttention fp16_triton"
-	@echo "  make test-bench    — Tests del benchmark de atención"
-	@echo "  make bench-offload — Medir it/s vs resolución y MB descargados del perfil activo"
-	@echo "  make bench-offload-sweep — Comparar con --cuda-stream vs sin él (requiere GPU)"
-	@echo "  make test-bench-offload — Tests del benchmark de offload"
-	@echo "  make logs          — Ver logs del servicio (Ctrl+C para salir)"
-	@echo "  make shell         — Abrir una shell dentro del contenedor"
-	@echo "  make workspace     — Crear árbol de datos y sembrar extensions/ si faltan (antes del primer up)"
-	@echo "  make preflight-gpu — Verificar driver NVIDIA y socket de nvidia-persistenced en el host (antes de up)"
-	@echo "  make seed-extensions — Copiar repo/extensions → EXTENSIONS_PATH solo si falta cada carpeta"
-	@echo "  make iib-access   — Crear .env en la extensión IIB con acceso a carpetas de salida (/data/output, /data/Images)"
-	@echo "  make krea2-ext    — Forzar actualización Krea2 Moodboard + Identity Edit desde GitHub"
-	@echo "  make krea2-depth-ext — Actualizar Depth/Pose ControlNet-LoRA (builtin) desde GitHub; luego make build"
-	@echo "  make reactor-fix  — Reparar deps ReActor (onnxruntime-gpu vs CPU) en contenedor en marcha"
-	@echo "  make ps            — Estado del servicio"
-	@echo "  make clean         — down y eliminar imagen local"
-	@echo "  make install-docker — Instalar Docker Engine y Docker Compose (plugin) desde repo oficial (Ubuntu/Debian, requiere sudo)"
-	@echo "  make push           — Construir imagen, etiquetar y subir a registro (REGISTRY_IMAGE)"
-	@echo "  make build-cuda12   — Construir variante CUDA 12.4 (para RunPod con driver < CUDA 13)"
-	@echo "  make push-cuda12   — Construir variante CUDA 12, etiquetar y subir (REGISTRY_IMAGE_CUDA12)"
-	@echo "  make build-slim    — Construir variante slim (sin onnxruntime-gpu/nunchaku, menos tamaño para RunPod)"
-	@echo "  make push-slim     — Construir slim, etiquetar y subir (REGISTRY_IMAGE, tag :slim)"
-	@echo "  make build-sage    — Construir imagen estándar + SageAttention horneado (tag :sage; no pisa :latest)"
-	@echo "  make push-sage     — Construir variante Sage, etiquetar y subir (REGISTRY_IMAGE, tag :sage)"
+	@echo "ARRANQUE POR MODELO (fija VRAM y atención recomendadas; Ctrl+C sale de los logs)"
+	@echo "  make klein   Flux.2 Klein 9B turbo — imagen; ImageStitch para multi-imagen."
+	@echo "               CFG 1, 4-8 pasos. Atención flash (secuencias cortas: CK/Sage no aportan)."
+	@echo "  make krea2   Krea 2 turbo — imagen + TE visión Qwen3-VL (Moodboard / Identity Edit)"
+	@echo "               y Depth/Pose ControlNet-LoRA. A >=1280 px prueba ATTN=ck."
+	@echo "  make wan     Wan 2.2 turbo — vídeo / I2V; ~32k tokens, la atención domina."
+	@echo "               Por defecto ATTN=ck (INT8). No combinar con Sparse Attention (se sustituyen)."
+	@echo ""
+	@echo "ARRANQUE MANUAL"
+	@echo "  make run      Arranca con VRAM y ATTN a mano (mismos ejes que los presets)."
+	@echo "  make up       Arranca con el EXTRA_ARGS del .env, sin ejes (RunPod / perfiles propios)."
+	@echo "  make down     Para y elimina el contenedor."
+	@echo "  make restart  down + up (por defecto con el perfil del .env)."
+	@echo "  make logs     Sigue los logs del servicio (Ctrl+C para salir)."
+	@echo "  make shell    Abre una shell dentro del contenedor."
+	@echo "  make ps       Estado del servicio."
+	@echo ""
+	@echo "  Ejes (para make run y presets):"
+	@echo "    ATTN=flash|ck|sage|sage-triton   sage* exige 'make build-sage' antes"
+	@echo "    VRAM=auto|8gb|normal|high        auto detecta por nvidia-smi"
+	@echo "    STREAM=on|off                    --cuda-stream en el perfil 8 GB (medición)"
+	@echo ""
+	@echo "IMAGEN"
+	@echo "  make build           Construye la imagen (primera vez o tras cambios)"
+	@echo "  make build-no-cache  Reconstruye sin caché (entrypoint, fixes de config.json)"
+	@echo "  make build-sage      Imagen + SageAttention horneado (tag :sage) para ATTN=sage*"
+	@echo "  make build-cuda12    Variante CUDA 12.4 (RunPod con driver < CUDA 13)"
+	@echo "  make build-slim      Variante slim (sin onnxruntime-gpu/nunchaku; menos tamaño)"
+	@echo ""
+	@echo "DATOS Y EXTENSIONES"
+	@echo "  make workspace       Crea el árbol de datos y siembra extensions/ si faltan (antes del 1er up)"
+	@echo "  make seed-extensions Copia extensiones a EXTENSIONS_PATH solo si falta cada carpeta"
+	@echo "  make krea2-ext       Krea2 Moodboard + Identity Edit (UI) desde GitHub"
+	@echo "  make krea2-depth-ext Depth/Pose ControlNet-LoRA (builtin); luego make build"
+	@echo "  make iib-access      .env de Infinite Image Browsing con acceso a carpetas de salida"
+	@echo "  make reactor-fix     Repara deps de ReActor (onnxruntime-gpu vs CPU) en contenedor vivo"
+	@echo ""
+	@echo "DIAGNÓSTICO"
+	@echo "  make preflight-gpu   Verifica driver NVIDIA y socket de nvidia-persistenced (antes de up)"
+	@echo "  make chatbot         Perfil 8 GB + warmup torch.compile al size del último gen (API)"
+	@echo "  make chatbot-warmup  Solo warmup (Forge ya tiene que estar arriba)"
+	@echo "  make test-warmup     Tests del parser/payload de chatbot-warmup"
+	@echo ""
+	@echo "BENCHMARKS (anexan filas a docs/*.md; requieren GPU)"
+	@echo "  make bench-attn         Mide N gens (semilla fija) del backend activo"
+	@echo "  make bench-attn-sweep   Compara flash vs CK INT8 (reinicia y mide)"
+	@echo "  make bench-attn-sage    Mide Sage fp16_cuda (requiere 'make build-sage')"
+	@echo "  make bench-attn-sage-triton  Mide Sage fp16_triton"
+	@echo "  make test-bench         Tests del benchmark de atención"
+	@echo "  make bench-offload      Mide it/s vs resolución y MB descargados del perfil activo"
+	@echo "  make bench-offload-sweep  Compara --cuda-stream on/off (reinicia y mide)"
+	@echo "  make test-bench-offload Tests del benchmark de offload"
+	@echo ""
+	@echo "PUBLICAR Y RUNPOD"
+	@echo "  make push | push-cuda12 | push-slim | push-sage   Construyen, etiquetan y suben"
+	@echo ""
+	@echo "INSTALACIÓN"
+	@echo "  make install-docker  Docker Engine + Compose plugin desde repo oficial (Ubuntu/Debian)"
+	@echo ""
+	@echo "  make clean           down y elimina la imagen local"
 	@echo ""
 	@echo "WebUI: http://localhost:$(PORT)   API: http://localhost:$(PORT)/docs"
 
 # Cargar .env y exportar para que compose use DATA_PATH y EXTENSIONS_PATH en los volúmenes
 ENV_LOAD = set -a && [ -f .env ] && . ./.env && set +a
+
+# Resuelve VRAM a los flags del perfil y los deja en la variable shell `extra`.
+# Un solo sitio para que presets, `run` y benchmarks compartan la misma lógica.
+define resolve_vram
+if [ "$(VRAM)" = "8gb" ]; then \
+  echo "  VRAM: 8 GB (forzado)"; extra="$(ARGS_8GB_SEL)"; \
+elif [ "$(VRAM)" = "normal" ]; then \
+  echo "  VRAM: normalvram (forzado)"; extra="$(ARGS_NORMAL)"; \
+elif [ "$(VRAM)" = "high" ]; then \
+  echo "  VRAM: highvram (forzado)"; extra="$(ARGS_HIGH)"; \
+else \
+  mem=$$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1); \
+  if [ -z "$$mem" ]; then echo "  VRAM: sin nvidia-smi -> 8 GB"; extra="$(ARGS_8GB_SEL)"; \
+  elif [ "$$mem" -ge 20000 ]; then echo "  VRAM: $$mem MB -> highvram"; extra="$(ARGS_HIGH)"; \
+  elif [ "$$mem" -ge 12000 ]; then echo "  VRAM: $$mem MB -> normalvram"; extra="$(ARGS_NORMAL)"; \
+  else echo "  VRAM: $$mem MB -> 8 GB"; extra="$(ARGS_8GB_SEL)"; fi; \
+fi
+endef
+
+# --- Arranque ---------------------------------------------------------------
+# Receta común de arranque: resuelve VRAM + ATTN y levanta el servicio.
+_launch-model: workspace
+	@$(MAKE) --no-print-directory preflight-gpu
+	@$(ENV_LOAD); \
+	$(resolve_vram); \
+	echo "  Atención: $(ATTN) $(ATTN_FLAGS)"; \
+	echo "  Imagen:   $(ATTN_IMAGE)"; \
+	export EXTRA_ARGS="$$extra $(ATTN_FLAGS)" FORGE_IMAGE="$(ATTN_IMAGE)"; \
+	$(COMPOSE) up -d$(if $(BENCH_DETACH),, && $(MAKE) --no-print-directory logs)
+
+# Presets por modelo: fijan el ATTN recomendado y detectan VRAM. Override con ATTN=/VRAM=.
+klein: ATTN = flash
+krea2: ATTN = flash
+wan:   ATTN = ck
+klein krea2 wan run: _launch-model
 
 build:
 	$(COMPOSE) build
@@ -108,14 +181,14 @@ build-slim:
 	docker build --build-arg BUILD_SLIM=1 -t forge-neo:slim .
 
 # Variante con SageAttention horneado (backend opcional; ver docs/attention-backends_09-10-2026.md).
-# No pisa :latest; arranca con `make sage`.
+# No pisa :latest; arranca con `make run ATTN=sage` o un preset con ATTN=sage.
 build-sage:
 	DOCKER_BUILDKIT=1 docker build --build-arg INSTALL_SAGE=1 -t $(FORGE_IMAGE_SAGE) .
 
+# Arranque con EXTRA_ARGS del .env, sin ejes (RunPod / perfiles propios).
 up: workspace
 	@$(MAKE) --no-print-directory preflight-gpu
-	@$(ENV_LOAD) && $(COMPOSE) up -d
-	@$(if $(BENCH_DETACH),,@$(MAKE) logs)
+	@$(ENV_LOAD) && $(COMPOSE) up -d$(if $(BENCH_DETACH),, && $(MAKE) --no-print-directory logs)
 
 down:
 	$(COMPOSE) down
@@ -156,65 +229,14 @@ preflight-gpu:
 # prerrequisito de `up:`. Con `make -j` los prerrequisitos corren en paralelo y la
 # comprobación podría perder la carrera contra `docker compose up`; el sub-make no.
 
-# Flux 2 Klein 9B: según VRAM se aplican flags de memoria y precisión
-klein9b: workspace
-	@$(MAKE) --no-print-directory preflight-gpu
-	@v=$$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1); \
-	if [ -z "$$v" ]; then \
-	  echo "No se detectó nvidia-smi; usando perfil 8GB"; \
-	  extra="$(ARGS_8GB)"; \
-	elif [ "$$v" -ge 20000 ]; then \
-	  echo "VRAM $$v MB: --highvram --bf16-unet"; \
-	  extra="--cuda-malloc --highvram --bf16-unet --pin-shared-memory --mmap-torch-files"; \
-	elif [ "$$v" -ge 12000 ]; then \
-	  echo "VRAM $$v MB: --normalvram --bf16-unet"; \
-	  extra="--cuda-malloc --normalvram --bf16-unet --pin-shared-memory --mmap-torch-files"; \
-	else \
-	  echo "VRAM $$v MB: perfil 8GB ($(ARGS_8GB))"; \
-	  extra="$(ARGS_8GB)"; \
-	fi; \
-	$(ENV_LOAD) && export EXTRA_ARGS="$$extra" && $(COMPOSE) up -d && $(MAKE) logs
-
-# Perfil fijo 8 GB (sin autodetección); útil para RTX 4060 / 3060 12GB límite, etc.
-lowvram: workspace
-	@$(MAKE) --no-print-directory preflight-gpu
-	@echo "Perfil 8GB: $(ARGS_8GB)"
-	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_8GB)" && $(COMPOSE) up -d
-	@$(if $(BENCH_DETACH),,@$(MAKE) logs)
-
-wan: workspace
-	@$(MAKE) --no-print-directory preflight-gpu
-	@echo "Perfil 8GB + atención INT8: $(ARGS_INT8_ATTN)"
-	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_INT8_ATTN)" && $(COMPOSE) up -d
-	@$(if $(BENCH_DETACH),,@$(MAKE) logs)
-
-# Atención INT8 de Comfy-Kitchen. Mismo flag que `make wan`; alias con nombre explícito.
-# No requiere rebuild: el módulo comfy_kitchen ya viene en la imagen.
-ck: wan
-
-# SageAttention fp16_cuda. Requiere la imagen con Sage (`make build-sage`).
-# Fuerza FP16: en sm89 el path FP8 por defecto (`auto`) es inestable.
-sage: workspace
-	@$(MAKE) --no-print-directory preflight-gpu
-	@echo "Perfil 8GB + SageAttention fp16_cuda: $(ARGS_SAGE)"
-	@$(ENV_LOAD) && export FORGE_IMAGE="$(FORGE_IMAGE_SAGE)" EXTRA_ARGS="$(ARGS_SAGE)" && $(COMPOSE) up -d
-	@$(if $(BENCH_DETACH),,@$(MAKE) logs)
-
-# Sage por Triton (kernels Triton, sin depender de los CUDA precompilados). Solo lo usa Triton,
-# que ya viene en la imagen; probar si el kernel CUDA fp16 diera problemas en sm89.
-sage-triton: workspace
-	@$(MAKE) --no-print-directory preflight-gpu
-	@echo "Perfil 8GB + SageAttention fp16_triton: $(ARGS_SAGE_TRITON)"
-	@$(ENV_LOAD) && export FORGE_IMAGE="$(FORGE_IMAGE_SAGE)" EXTRA_ARGS="$(ARGS_SAGE_TRITON)" && $(COMPOSE) up -d
-	@$(if $(BENCH_DETACH),,@$(MAKE) logs)
-
+# --- API / chatBot ----------------------------------------------------------
 # Llamadas API del chatBot: mismo modelo/size, N escenas seguidas.
 # 8 GB + compile guard_filter_fn (compatible con --cuda-malloc; max-autotune no lo es).
 # El warmup es 1 step al size de params.txt; no pisa el último gen (save_images=false + restaura params.txt).
 chatbot: workspace
 	@$(MAKE) --no-print-directory preflight-gpu
-	@echo "Perfil chatBot 8GB: $(ARGS_8GB)"
-	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_8GB)" && $(COMPOSE) up -d && $(MAKE) chatbot-warmup && $(MAKE) logs
+	@echo "Perfil chatBot 8 GB: $(ARGS_8GB)"
+	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_8GB)" && $(COMPOSE) up -d && $(MAKE) --no-print-directory chatbot-warmup && $(MAKE) --no-print-directory logs
 
 chatbot-warmup:
 	@$(ENV_LOAD); \
@@ -244,11 +266,9 @@ test-bench:
 
 # --- Benchmark de trasiego de pesos (offload RAM<->VRAM) --------------------
 # Mide la curva it/s vs resolución del perfil activo y anexa un bloque por perfil.
-# Si el modelo cabe entero en VRAM no hay líneas de offload: fuerza lowvram para medir.
+# Si el modelo cabe entero en VRAM no hay líneas de offload: fuerza VRAM=8gb para medir.
 BENCH_OFFLOAD_ARGS   ?= --sizes 768x768,1024x1024,1280x1280 --steps 8 --runs 3
 BENCH_OFFLOAD_REPORT ?= docs/bench-offload_09-10-2026.md
-# Perfil equivalente al 8GB sin el offload asíncrono, para aislar el efecto de --cuda-stream.
-ARGS_8GB_NOSTREAM = $(filter-out --cuda-stream,$(ARGS_8GB))
 
 bench-offload:
 	@$(ENV_LOAD); \
@@ -269,40 +289,36 @@ BENCH_SLEEP ?= 30
 bench-attn-sweep: bench-attn-flash bench-attn-ck
 
 bench-attn-flash:
-	@$(MAKE) --no-print-directory lowvram BENCH_DETACH=1
+	@$(MAKE) --no-print-directory run VRAM=8gb ATTN=flash BENCH_DETACH=1
 	@sleep $(BENCH_SLEEP)
 	@$(MAKE) --no-print-directory bench-attn BENCH_ARGS="$(BENCH_ARGS) --label flash"
 
 bench-attn-ck:
-	@$(MAKE) --no-print-directory ck BENCH_DETACH=1
+	@$(MAKE) --no-print-directory run VRAM=8gb ATTN=ck BENCH_DETACH=1
 	@sleep $(BENCH_SLEEP)
 	@$(MAKE) --no-print-directory bench-attn BENCH_ARGS="$(BENCH_ARGS) --label ck-int8"
 
 bench-attn-sage: build-sage
-	@$(MAKE) --no-print-directory sage BENCH_DETACH=1
+	@$(MAKE) --no-print-directory run VRAM=8gb ATTN=sage BENCH_DETACH=1
 	@sleep $(BENCH_SLEEP)
 	@$(MAKE) --no-print-directory bench-attn BENCH_ARGS="$(BENCH_ARGS) --label sage-fp16_cuda"
 
 bench-attn-sage-triton: build-sage
-	@$(MAKE) --no-print-directory sage-triton BENCH_DETACH=1
+	@$(MAKE) --no-print-directory run VRAM=8gb ATTN=sage-triton BENCH_DETACH=1
 	@sleep $(BENCH_SLEEP)
 	@$(MAKE) --no-print-directory bench-attn BENCH_ARGS="$(BENCH_ARGS) --label sage-fp16_triton"
 
-# Compara el 8GB con offload asíncrono (--cuda-stream) frente a sin él. Reinicia entre ambos.
+# Compara el perfil 8 GB con offload asíncrono (--cuda-stream) frente a sin él.
 BENCH_OFFLOAD_SLEEP ?= 30
 bench-offload-sweep: bench-offload-sweep-nostream bench-offload-sweep-stream
 
 bench-offload-sweep-nostream:
-	@$(MAKE) --no-print-directory preflight-gpu
-	@echo "Perfil 8GB sin --cuda-stream: $(ARGS_8GB_NOSTREAM)"
-	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_8GB_NOSTREAM)" && $(COMPOSE) up -d
+	@$(MAKE) --no-print-directory run VRAM=8gb STREAM=off ATTN=flash BENCH_DETACH=1
 	@sleep $(BENCH_OFFLOAD_SLEEP)
 	@$(MAKE) --no-print-directory bench-offload BENCH_OFFLOAD_LABEL="8gb-nostream"
 
 bench-offload-sweep-stream:
-	@$(MAKE) --no-print-directory preflight-gpu
-	@echo "Perfil 8GB con --cuda-stream: $(ARGS_8GB)"
-	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_8GB)" && $(COMPOSE) up -d
+	@$(MAKE) --no-print-directory run VRAM=8gb STREAM=on ATTN=flash BENCH_DETACH=1
 	@sleep $(BENCH_OFFLOAD_SLEEP)
 	@$(MAKE) --no-print-directory bench-offload BENCH_OFFLOAD_LABEL="8gb-stream"
 
@@ -407,7 +423,7 @@ krea2-ext:
 	  && echo "Instaladas en $$ext_root:" \
 	  && echo "  - sd-forge-krea2-moodboard" \
 	  && echo "  - sd-forge-krea2-edit (fix dynamic_args.pop aplicado)" \
-	  && echo "Reinicia la WebUI (make restart). Requiere imagen con el backend patch (make build)."
+	  && echo "Reinicia la WebUI: make run krea2 (o make restart). Requiere imagen con el backend patch (make build)."
 
 # Actualiza el vendor de Krea2 Depth/Pose ControlNet-LoRA (extensions-builtin de la imagen).
 # Tras correrlo: make build && make restart. El peso ~862 MB no se descarga aquí.

@@ -18,7 +18,8 @@ de documentación upstream.
 | **NO instalado** | `sageattention`, `nunchaku`, `bitsandbytes` |
 
 Conclusión de partida: **la atención activa hoy es FlashAttention** (porque `flash_attn` está
-instalado), con xformers como fallback. `--use-ck-attention` solo se usa en `make wan`.
+instalado), con xformers como fallback. `--use-ck-attention` solo se usa en el preset `make wan`
+(o con `make run ATTN=ck`).
 
 ## Cómo elige Forge el backend
 
@@ -66,10 +67,10 @@ sm120→ fp8_cuda
 
 Es decir, **en tu GPU `auto` elige el path FP8**, que la propia comunidad reporta como inestable en
 sm89 (fallos `unspecified launch failure`, NaNs en cargas reales; ver thu-ml/SageAttention#309). El
-path FP16 es estable. Por eso `make sage` arranca con **`--sage-function fp16_cuda`** de forma
+path FP16 es estable. Por eso `make run ATTN=sage` arranca con **`--sage-function fp16_cuda`** de forma
 explícita: nunca dejes `auto` en sm89.
 
-Alternativa si el kernel CUDA diera problemas: `make sage-triton` usa
+Alternativa si el kernel CUDA diera problemas: `make run ATTN=sage-triton` usa
 `--sage-function fp16_triton`, que mapea a `sageattention.sageattn_qk_int8_pv_fp16_triton` (INT8 QK +
 FP16 PV por Triton). Hay que **medir**: Sage en sm89 no tiene kernel f16 con acumulador f16, así que
 `sageattn_qk_int8_pv_fp16_cuda` con `pv_accum_dtype="fp16"` cae a los símbolos `sm80_compile` en
@@ -93,9 +94,9 @@ bit-exacto**: a igual semilla da una imagen distinta. No es intercambiable a mit
 2. **docker-compose.yml**: `image: ${FORGE_IMAGE:-forge-neo:latest}` para poder arrancar la variante
    `:sage` sin pisar `latest`.
 3. **Makefile**:
-   - `make ck` → alias de `make wan` (CK INT8, sin build).
-   - `make build-sage` → construye `forge-neo:sage` con Sage horneado.
-   - `make sage` → arranca con la imagen `:sage` + `--sage-function fp16_cuda`.
+   - Ejes de arranque: `ATTN=flash|ck|sage|sage-triton` y `VRAM=auto|8gb|normal|high` (targets `make run`).
+   - `make wan` arranca con `ATTN=ck` (CK INT8, sin build); `make build-sage` hornea Sage.
+   - `make run ATTN=sage` arranca con la imagen `:sage` + `--sage-function fp16_cuda`.
    - `make push-sage` → publica `REGISTRY_IMAGE` con tag `:sage`.
 
 ## Plan de medición (antes de fijar nada)
@@ -112,15 +113,15 @@ Pasos equivalentes si lo haces a mano:
 
 1. Fija **misma semilla, mismo prompt, misma resolución, mismos pasos**.
 2. Genera una vez con cada perfil y anota el tiempo del log (`Total progress`/IT/s) y el pico de VRAM:
-   - `make lowvram` (base, FlashAttention)
-   - `make ck` (CK INT8)
-   - `make build-sage && make sage` (Sage fp16_cuda)
-   - `make sage-triton` (Sage fp16_triton, si el CUDA diera problemas)
+   - `make run VRAM=8gb ATTN=flash` (base, FlashAttention)
+   - `make run VRAM=8gb ATTN=ck` (CK INT8)
+   - `make build-sage && make run VRAM=8gb ATTN=sage` (Sage fp16_cuda)
+   - `make run VRAM=8gb ATTN=sage-triton` (Sage fp16_triton, si el CUDA diera problemas)
 3. Casos a medir, por orden de interés: **Wan 2.2 (vídeo)** → **Krea 2 a 1280/1536px** → (opcional) 768px
    para confirmar que "no hay diferencia".
 4. Compara también **calidad**, no solo velocidad: a igual semilla la imagen cambiará si el backend
    cuantiza (CK INT8 y Sage). Revisa sobre todo detalle fino y texto.
-5. Si usas Sparse Attention desde la UI, **no** lo combines con `make ck` ni con `make sage`: el script
+5. Si usas Sparse Attention desde la UI, **no** lo combines con `make wan` ni con `ATTN=ck` / `ATTN=sage`: el script
    instala un `optimized_attention_override` que sustituye el backend activo.
 
 ## Riesgos y cosas a evitar

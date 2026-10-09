@@ -232,13 +232,13 @@ Settings persistentes del moodboard: **Settings → Krea2 Moodboard**.
 |--------|----------------------|------------|
 | Patch frágil vs `neo` HEAD | Clone `--depth 1` sin pin | Pin `FORGE_NEO_REF` + pin del patch |
 | `.git` borrado | `git apply` “oficial” no aplica tal cual | Aplicar **antes** de `rm -rf .git`, o usar `patch -p1` |
-| VRAM | TE visión (~9 GB bf16) + K2 + LoRA + refs | En 8 GB (`make lowvram`) es **muy justo / inviable** en bf16; probar `fp8_scaled` del TE y perfil lowvram; Moodboard solo ya es pesado |
+| VRAM | TE visión (~9 GB bf16) + K2 + LoRA + refs | En 8 GB (`make krea2 VRAM=8gb`) es **muy justo / inviable** en bf16; probar `fp8_scaled` del TE y perfil lowvram; Moodboard solo ya es pesado |
 | Extensiones en volumen vacío | RunPod nuevo = sin carpetas | Documentar `make krea2-ext` o bake + sync al volumen |
 | Confundir packs Civitai | Zip ComfyUI ≠ Forge Neo | Usar solo `Krea2-ForgeNeo-Toolkit` o el repo GitHub |
 | Licencias | Toolkit AGPL-3.0 (como Neo); pesos Krea/LoRA aparte | No redistribuir pesos en la imagen |
 | Auto face-ref prep | 2 generaciones anidadas + caché en `ref_cache/` de la extensión | El caché debe vivir en el volumen de extensiones (persistente) |
 
-**Crítica VRAM:** este proyecto tiene perfiles `klein9b` / `lowvram` pensados para Flux/Klein en ≤12 GB. Krea2 + Qwen3-VL visión es otro perfil de memoria. No asumas que `ARGS_8GB` sirva igual; documenta un perfil aparte o avisa que Moodboard/Edit piden ≥12–16 GB de forma realista.
+**Crítica VRAM:** los presets están pensados para Flux/Klein/Krea2 en ≤12 GB. Krea2 + Qwen3-VL visión es el perfil más exigente de memoria. No asumas que `ARGS_8GB` sirva igual; documenta `make krea2 VRAM=8gb` como el extremo ajustado o avisa que Moodboard/Edit piden ≥12–16 GB de forma realista.
 
 ---
 
