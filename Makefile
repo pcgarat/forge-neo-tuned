@@ -25,7 +25,7 @@ ARGS_8GB = --cuda-malloc --lowvram --fp8_e4m3fn-unet --reserve-vram 2 --pin-shar
 # Ojo: a igual semilla produce una imagen distinta, no es intercambiable a mitad de un trabajo.
 ARGS_INT8_ATTN = $(ARGS_8GB) --use-ck-attention
 
-.PHONY: help build build-no-cache build-cuda12 build-slim push push-cuda12 push-slim up down restart logs shell workspace seed-extensions ps clean klein9b lowvram wan chatbot chatbot-warmup test-warmup iib-access krea2-ext krea2-depth-ext reactor-fix install-docker
+.PHONY: help build build-no-cache build-cuda12 build-slim push push-cuda12 push-slim up down restart logs shell workspace preflight-gpu preflight-gpu-check seed-extensions ps clean klein9b lowvram wan chatbot chatbot-warmup test-warmup iib-access krea2-ext krea2-depth-ext reactor-fix install-docker
 
 help:
 	@echo "sd-webui-forge-neo — objetivos disponibles:"
@@ -44,6 +44,7 @@ help:
 	@echo "  make logs          — Ver logs del servicio (Ctrl+C para salir)"
 	@echo "  make shell         — Abrir una shell dentro del contenedor"
 	@echo "  make workspace     — Crear árbol de datos y sembrar extensions/ si faltan (antes del primer up)"
+	@echo "  make preflight-gpu — Verificar driver NVIDIA y socket de nvidia-persistenced en el host (antes de up)"
 	@echo "  make seed-extensions — Copiar repo/extensions → EXTENSIONS_PATH solo si falta cada carpeta"
 	@echo "  make iib-access   — Crear .env en la extensión IIB con acceso a carpetas de salida (/data/output, /data/Images)"
 	@echo "  make krea2-ext    — Forzar actualización Krea2 Moodboard + Identity Edit desde GitHub"
@@ -79,6 +80,7 @@ build-slim:
 	docker build --build-arg BUILD_SLIM=1 -t forge-neo:slim .
 
 up: workspace
+	@$(MAKE) --no-print-directory preflight-gpu
 	@$(ENV_LOAD) && $(COMPOSE) up -d && $(MAKE) logs
 
 down:
@@ -86,8 +88,43 @@ down:
 
 restart: down up
 
+# Comprueba en el host lo que runc necesita para montar la GPU en el contenedor.
+# Evita fallos crípticos de `docker compose up` (p. ej. "open /run/nvidia-persistenced/socket:
+# no such file or directory") cuando el driver NVIDIA está desincronizado o el daemon está parado.
+preflight-gpu-check:
+	@if ! nvidia-smi >/dev/null 2>&1; then \
+	  mod=$$(sed -n 's/.*Module for x86_64 *\([0-9.]*\).*/\1/p' /proc/driver/nvidia/version 2>/dev/null); \
+	  lib=$$(readlink -f /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1 2>/dev/null | sed -n 's/.*libnvidia-ml[.]so[.]//p'); \
+	  echo "ERROR: nvidia-smi no funciona; no se puede exponer la GPU a Docker."; \
+	  echo "       Módulo cargado:  $$mod"; \
+	  echo "       Librería NVML:   $$lib"; \
+	  if [ -n "$$mod" ] && [ "$$mod" != "$$lib" ]; then \
+	    echo "       Desajuste driver/kernel: el módulo en memoria no se recarga en caliente"; \
+	    echo "       con el escritorio usando la GPU. Arréglalo con: sudo reboot"; \
+	  elif [ -f /var/run/reboot-required ]; then \
+	    echo "       Hay un reinicio pendiente; arranca con: sudo reboot"; \
+	  else \
+	    echo "       Revisa dmesg y que libnvidia-container-toolkit esté instalado."; \
+	  fi; \
+	  exit 1; \
+	fi; \
+	if [ ! -S /run/nvidia-persistenced/socket ]; then \
+	  echo "ERROR: falta /run/nvidia-persistenced/socket (nvidia-persistenced parado)."; \
+	  echo "       El CDI spec de NVIDIA lo monta en el contenedor; sin él, runc falla."; \
+	  echo "       Arréglalo con: sudo systemctl restart nvidia-persistenced"; \
+	  exit 1; \
+	fi
+
+preflight-gpu:
+	@$(MAKE) --no-print-directory preflight-gpu-check
+
+# Ojo: las recetas lo invocan como sub-make (`$(MAKE) preflight-gpu`) y NO como
+# prerrequisito de `up:`. Con `make -j` los prerrequisitos corren en paralelo y la
+# comprobación podría perder la carrera contra `docker compose up`; el sub-make no.
+
 # Flux 2 Klein 9B: según VRAM se aplican flags de memoria y precisión
 klein9b: workspace
+	@$(MAKE) --no-print-directory preflight-gpu
 	@v=$$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1); \
 	if [ -z "$$v" ]; then \
 	  echo "No se detectó nvidia-smi; usando perfil 8GB"; \
@@ -106,10 +143,12 @@ klein9b: workspace
 
 # Perfil fijo 8 GB (sin autodetección); útil para RTX 4060 / 3060 12GB límite, etc.
 lowvram: workspace
+	@$(MAKE) --no-print-directory preflight-gpu
 	@echo "Perfil 8GB: $(ARGS_8GB)"
 	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_8GB)" && $(COMPOSE) up -d && $(MAKE) logs
 
 wan: workspace
+	@$(MAKE) --no-print-directory preflight-gpu
 	@echo "Perfil 8GB + atención INT8: $(ARGS_INT8_ATTN)"
 	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_INT8_ATTN)" && $(COMPOSE) up -d && $(MAKE) logs
 
@@ -117,6 +156,7 @@ wan: workspace
 # 8 GB + compile guard_filter_fn (compatible con --cuda-malloc; max-autotune no lo es).
 # El warmup es 1 step al size de params.txt; no pisa el último gen (save_images=false + restaura params.txt).
 chatbot: workspace
+	@$(MAKE) --no-print-directory preflight-gpu
 	@echo "Perfil chatBot 8GB: $(ARGS_8GB)"
 	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_8GB)" && $(COMPOSE) up -d && $(MAKE) chatbot-warmup && $(MAKE) logs
 
