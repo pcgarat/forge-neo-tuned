@@ -86,8 +86,9 @@ RUN python -m pip install --no-cache-dir --no-deps 'easy-dwpose==1.0.2'
 
 # Extensiones Neo en extensions-builtin (install.py no corre con --skip-install).
 # mediapipe ya viene por otras deps; no pinchar 0.10.x encima.
-# Sin boto3/aliyun: Prompt All-in-One los usa solo para traductores AWS/Aliyun;
-# instalar boto3 + el `find …/docs` de abajo dejaba botocore roto y tumba accelerate.
+# boto3/aliyun-python-sdk: traductores AWS/Aliyun de Prompt All-in-One, que si no los
+# reporta como "No instalado" en su panel. El `find …/docs` de la limpieza borraba
+# boto3.docs (paquete Python real que boto3 importa) y dejaba su import roto; ya no.
 RUN python -m pip install --no-cache-dir \
       'ultralytics==8.3.253' \
       'sqlalchemy' \
@@ -99,6 +100,9 @@ RUN python -m pip install --no-cache-dir \
       'lxml' \
       'pathos' \
       'openai' \
+      'boto3' \
+      'aliyun-python-sdk-core' \
+      'aliyun-python-sdk-alimt' \
     && python -c "import torch; assert '2.' in torch.__version__, torch.__version__"
 
 # SageAttention 2.2.0 (opt-in con --build-arg INSTALL_SAGE=1).
@@ -124,12 +128,13 @@ RUN if [ "$INSTALL_SAGE" = "1" ]; then \
 
 # Limpieza agresiva para reducir tamaño (RunPod tiene límite de disco para la imagen)
 # No strippear onnxruntime: rompe providers CUDA.
-# No borrar */botocore/docs: botocore lo necesita si algún día se instala boto3.
+# No borrar docs/doc que sean paquetes Python (con __init__.py): boto3/botocore y otros
+# los importan en runtime, y borrarlos rompía su import.
 RUN find /usr/local/lib/python3.13 -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/local/lib/python3.13 -name '*.pyc' -delete 2>/dev/null || true \
     && find /usr/local/lib/python3.13 -type d -name tests -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/local/lib/python3.13 -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true \
-    && find /usr/local/lib/python3.13 -type d \( -name 'docs' -o -name 'doc' \) ! -path '*/botocore/*' -exec rm -rf {} + 2>/dev/null || true \
+    && find /usr/local/lib/python3.13 -type d \( -name 'docs' -o -name 'doc' \) ! -exec test -e {}/__init__.py \; -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/local/lib/python3.13 -name '*.a' -delete 2>/dev/null || true \
     && find /usr/local/lib/python3.13 -name '*.so' ! -path '*/onnxruntime/*' ! -path '*/sageattention/*' -exec strip --strip-unneeded {} \; 2>/dev/null || true \
     && rm -rf /usr/local/lib/python3.13/site-packages/torch/share 2>/dev/null || true \
