@@ -186,7 +186,7 @@ up-interactive:
 	[ -n "$(LONGSEQ)" ] && args="$$args --long-sequence"; \
 	[ -n "$(API)" ] && args="$$args --api"; \
 	eval "$$(python3 $(CURDIR)/scripts/choose_profile.py --make $$args)"; \
-	$(MAKE) --no-print-directory run ATTN=$$ATTN VRAM=$$VRAM WARMUP=$$WARMUP
+	$(MAKE) --no-print-directory run ATTN=$$ATTN VRAM=$$VRAM WARMUP=$$WARMUP STREAM=$$STREAM
 
 test-choose-profile:
 	python3 -m unittest tests.test_choose_profile -v

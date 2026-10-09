@@ -71,6 +71,15 @@ class RecommendTests(unittest.TestCase):
         rec = c.recommend(c.Answers())
         self.assertEqual(rec.vram, "auto")
 
+    def test_stream_on_by_default(self):
+        rec = c.recommend(c.Answers())
+        self.assertTrue(rec.stream)
+
+    def test_stream_off_propagates_and_notes(self):
+        rec = c.recommend(c.Answers(stream=False))
+        self.assertFalse(rec.stream)
+        self.assertTrue(any("STREAM=off" in n for n in rec.notes))
+
 
 class MakeLinesTests(unittest.TestCase):
     def test_flash_plain(self):
@@ -80,6 +89,14 @@ class MakeLinesTests(unittest.TestCase):
     def test_ck_with_warmup(self):
         rec = c.Recommendation(attn="ck", attn_reason="", warmup=True)
         self.assertEqual(rec.make_lines(), ["ATTN=ck", "VRAM=auto", "WARMUP=1"])
+
+    def test_stream_off_appended(self):
+        rec = c.Recommendation(attn="flash", attn_reason="", stream=False)
+        self.assertEqual(rec.make_lines(), ["ATTN=flash", "VRAM=auto", "STREAM=off"])
+
+    def test_stream_on_not_emitted(self):
+        rec = c.Recommendation(attn="flash", attn_reason="", stream=True)
+        self.assertNotIn("STREAM=off", rec.make_lines())
 
 
 class AskStreamTests(unittest.TestCase):

@@ -54,7 +54,7 @@ Con `--skip-install`, cada extensión no puede instalar lo suyo; se hornea a pro
 ### Operativa
 
 - Presets por modelo: `make klein` / `krea2` / `wan` (VRAM auto + atención recomendada) y `make run ATTN= VRAM=`
-- `make up-interactive` deriva ejes (modelo/tamaño/imagen-vídeo/API) en un asistente; `make preflight-gpu` valida driver y `nvidia-persistenced` antes de arrancar
+- `make up-interactive` deriva ejes (modelo/tamaño/imagen-vídeo/API/offload) en un asistente; `make preflight-gpu` valida driver y `nvidia-persistenced` antes de arrancar
 - Estado en `/data`: base SQLite de Agent Scheduler y `ui-config.json` (State Manager) sobreviven al contenedor
 - Perfil 8 GB con `--cuda-stream` + `--pin-shared-memory` (memlock holgado en compose) para solapar el trasiego RAM↔VRAM
 - `PUID`/`PGID` + `setpriv` (output no queda root)
@@ -111,8 +111,8 @@ Guía: [docs/integracion-krea2-moodboard-identity-edit-forge-neo_23-07-2026.md](
 | `make klein` | Flux.2 Klein 9B turbo: VRAM auto + atención `flash` |
 | `make krea2` | Krea 2 turbo: VRAM auto + `flash` (prueba `ATTN=ck` a ≥1280 px) |
 | `make wan` | Wan 2.2 turbo (vídeo): VRAM auto + `ck` (INT8) |
-| `make run ATTN= VRAM=` | Arranque manual con los ejes a la carta (`ATTN=flash|ck|sage|sage-triton`, `VRAM=auto|8gb|normal|high`) |
-| `make up-interactive` | Asistente: pregunta modelo, tamaño, imagen/vídeo… y arranca con lo recomendado |
+| `make run ATTN= VRAM=` | Arranque manual con los ejes a la carta (`ATTN=flash|ck|sage|sage-triton`, `VRAM=auto|8gb|normal|high`, `STREAM=on|off`) |
+| `make up-interactive` | Asistente: pregunta modelo, tamaño, imagen/vídeo, API y solape de offload… y arranca con lo recomendado |
 | `make up` | Arranca con el `EXTRA_ARGS` del `.env`, sin ejes |
 | `make preflight-gpu` | Valida driver NVIDIA y socket de `nvidia-persistenced` (evita fallos crípticos de runc) |
 | `make chatbot` | Perfil 8 GB + warmup `torch.compile` para API |

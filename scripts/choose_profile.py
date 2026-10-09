@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Asistente de arranque: pregunta lo que importa y recomienda los ejes de `make run`.
 
-Resuelve `ATTN` (backend de atención) y `VRAM` (perfil de memoria) a partir de lo que de
-verdad cambia la decisión: modelo, imagen vs vídeo, tamaño, uso por API y longitud de la
-secuencia. Lo usa `make up-interactive`.
+Resuelve `ATTN` (backend de atención), `VRAM` (perfil de memoria) y `STREAM` (solape del
+offload) a partir de lo que de verdad cambia la decisión: modelo, imagen vs vídeo, tamaño,
+uso por API y longitud de la secuencia. Lo usa `make up-interactive`.
 
 Tres modos:
   - Interactivo (por defecto): pregunta por stdin y resume por stderr.
@@ -39,6 +39,7 @@ class Answers:
     resolution: int = 1024  # lado mayor, en píxeles
     api: bool = False
     long_sequence: bool = False
+    stream: bool = True  # solape de offload (--cuda-stream); off solo para medir
 
 
 @dataclass
@@ -47,12 +48,15 @@ class Recommendation:
     attn_reason: str
     vram: str = "auto"
     warmup: bool = False
+    stream: bool = True
     notes: list[str] = field(default_factory=list)
 
     def make_lines(self) -> list[str]:
         lines = [f"ATTN={self.attn}", f"VRAM={self.vram}"]
         if self.warmup:
             lines.append("WARMUP=1")
+        if not self.stream:
+            lines.append("STREAM=off")
         return lines
 
 
@@ -78,7 +82,7 @@ def recommend(a: Answers) -> Recommendation:
     else:
         attn, reason = "flash", "secuencias cortas: CK/Sage no aportan y el offload domina"
 
-    rec = Recommendation(attn=attn, attn_reason=reason, warmup=a.api)
+    rec = Recommendation(attn=attn, attn_reason=reason, warmup=a.api, stream=a.stream)
 
     if a.model == "krea2":
         rec.notes.append("No añadas --fast-fp8 (falla en Krea 2).")
@@ -95,6 +99,10 @@ def recommend(a: Answers) -> Recommendation:
         rec.notes.append("CK INT8 no es bit-exacto: a igual semilla la imagen cambia.")
     if a.api:
         rec.notes.append("Warmup torch.compile (guard_filter_fn) al size del último gen.")
+    if not a.stream:
+        rec.notes.append(
+            "Offload asíncrono desactivado (STREAM=off): para comparar, no para uso normal."
+        )
     return rec
 
 
@@ -143,12 +151,16 @@ def interactive() -> Answers:
         "¿Secuencias largas? (Moodboard/Identity Edit, muchas referencias)", False
     )
     api = _ask_bool("¿Lotes repetidos por API a la misma resolución?", False)
+    stream = _ask_bool(
+        "¿Solapar el trasiego de pesos RAM↔VRAM? (--cuda-stream; 'no' solo para medir)", True
+    )
     return Answers(
         model=model,
         kind=kind,
         resolution=resolution,
         api=api,
         long_sequence=long_sequence,
+        stream=stream,
     )
 
 
@@ -159,15 +171,17 @@ def format_summary(a: Answers, rec: Recommendation) -> str:
         f"  Tamaño:   lado mayor {a.resolution} px",
         f"  Atención: {rec.attn} — {rec.attn_reason}",
         f"  VRAM:     {rec.vram} (nvidia-smi decide el perfil)",
+        f"  Offload:  {'solapado (--cuda-stream)' if rec.stream else 'sin solapar (STREAM=off)'}",
         f"  Warmup:   {'sí' if rec.warmup else 'no'}",
     ]
     if rec.notes:
         lines.append("Notas:")
         lines += [f"  - {note}" for note in rec.notes]
     warmup = " WARMUP=1" if rec.warmup else ""
+    stream = "" if rec.stream else " STREAM=off"
     lines += [
         "",
-        f"Arrancando con: make run ATTN={rec.attn} VRAM={rec.vram}{warmup}",
+        f"Arrancando con: make run ATTN={rec.attn} VRAM={rec.vram}{warmup}{stream}",
     ]
     return "\n".join(lines)
 
@@ -179,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resolution", type=parse_resolution, default=None)
     parser.add_argument("--long-sequence", action="store_true")
     parser.add_argument("--api", action="store_true")
+    parser.add_argument("--no-stream", action="store_true", help="Desactiva --cuda-stream (medición)")
     parser.add_argument("--make", action="store_true", help="Imprime solo VAR=valor (para eval)")
     args = parser.parse_args(argv)
 
@@ -189,6 +204,7 @@ def main(argv: list[str] | None = None) -> int:
             resolution=args.resolution or 1024,
             api=args.api,
             long_sequence=args.long_sequence,
+            stream=not args.no_stream,
         )
     else:
         if not sys.stdin.isatty():
