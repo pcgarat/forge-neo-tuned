@@ -7,6 +7,9 @@ solo cambian el backend de atención (`make lowvram` / `make ck` / `make sage`).
 
 No arranca ni reinicia el contenedor; eso lo orquesta `make bench-attn-sweep`.
 Escribe/actualiza un informe markdown (una fila por backend) para comparar de un vistazo.
+
+`/cmd-flags` se consulta solo como dato informativo (la etiqueta del backend la pasa el
+Makefile): si el endpoint falla (bug de validación de Forge Neo), el bench sigue midiendo.
 """
 
 from __future__ import annotations
@@ -114,6 +117,21 @@ def fetch_cmd_flags(base_url: str, timeout: float = 30.0) -> dict[str, Any]:
     return body if isinstance(body, dict) else {}
 
 
+def fetch_cmd_flags_or_empty(base_url: str, timeout: float = 30.0) -> dict[str, Any]:
+    """Igual que `fetch_cmd_flags` pero no aborta el benchmark si el endpoint falla.
+
+    `/cmd-flags` en Forge Neo devuelve 500 por un bug de validación de su modelo de
+    respuesta cuando hay flags numéricos con default nulo (`--port`, `--reserve-vram`,
+    `--cuda-stream`). Las etiquetas del bench se pasan explícitamente, así que este
+    endpoint es informativo, no un requisito: degradar a {} permite medir igualmente.
+    """
+    try:
+        return fetch_cmd_flags(base_url, timeout)
+    except BenchError as exc:
+        print(f"Aviso: /cmd-flags no disponible ({exc}); se usará la etiqueta indicada.", file=sys.stderr)
+        return {}
+
+
 def fetch_memory(base_url: str, timeout: float = 30.0) -> dict[str, Any]:
     body = _http_json("GET", f"{base_url.rstrip('/')}/sdapi/v1/memory", timeout=timeout)
     return body if isinstance(body, dict) else {}
@@ -218,12 +236,14 @@ def benchmark(
     return result
 
 
-def format_table(results: list[BenchResult]) -> str:
-    header = (
-        "| Backend | Endpoint | Resolución | Pasos | Semilla | Runs (s) | Mediana (s) | "
-        "it/s | Pico VRAM (GB) | OOM |\n"
-        "|---|---|---|---|---|---|---|---|---|---|\n"
-    )
+_TABLE_HEADER = (
+    "| Backend | Endpoint | Resolución | Pasos | Semilla | Runs (s) | Mediana (s) | "
+    "it/s | Pico VRAM (GB) | OOM |\n"
+    "|---|---|---|---|---|---|---|---|---|---|\n"
+)
+
+
+def format_rows(results: list[BenchResult]) -> str:
     rows = []
     for r in results:
         runs = ", ".join(f"{x:.2f}" for x in r.runs)
@@ -233,21 +253,38 @@ def format_table(results: list[BenchResult]) -> str:
             f"| {r.label} | {r.endpoint} | {r.width}x{r.height} | {r.steps} | {r.seed} | "
             f"{runs} | {r.median:.2f} | {r.it_s:.2f} | {vram} | {oom} |"
         )
-    return header + "\n".join(rows) + "\n"
+    return "\n".join(rows)
+
+
+def format_table(results: list[BenchResult]) -> str:
+    rows = format_rows(results)
+    return _TABLE_HEADER + (rows + "\n" if rows else "")
 
 
 def append_report(path: Path, results: list[BenchResult]) -> None:
-    """Crea o amplía el informe markdown. La primera línea lleva la fecha de modificación."""
+    """Crea o amplía el informe markdown. La primera línea lleva la fecha de modificación.
+
+    El informe tiene **una sola** cabecera de tabla: cada anexado añade filas al final de la
+    tabla existente, no una tabla nueva (si no, la salida se llena de cabeceras repetidas).
+    """
     today = time.strftime("%Y-%m-%d")
-    table = format_table(results)
+    new_rows = format_rows(results)
     if path.is_file():
         lines = path.read_text(encoding="utf-8").splitlines()
         lines[0] = f"# Última modificación: {today}"
-        body = "\n".join(lines).rstrip() + "\n"
-        if "# Resultados" in body:
-            body = body + "\n" + table
+        idx = next(
+            (i for i, line in enumerate(lines) if line.startswith("| Backend |")), None
+        )
+        if idx is None:
+            body = "\n".join(lines).rstrip() + "\n\n# Resultados\n\n" + _TABLE_HEADER + new_rows + "\n"
         else:
-            body = body + "\n# Resultados\n\n" + table
+            existing_rows = [
+                line
+                for line in lines[idx + 2 :]
+                if line.startswith("|") and not line.startswith("| Backend |")
+            ]
+            rows = existing_rows + new_rows.splitlines()
+            body = "\n".join(lines[:idx]).rstrip() + "\n\n" + _TABLE_HEADER + "\n".join(rows) + "\n"
         path.write_text(body, encoding="utf-8")
         return
     path.write_text(
@@ -255,7 +292,7 @@ def append_report(path: Path, results: list[BenchResult]) -> None:
         "# Benchmark de backends de atención\n\n"
         "Generado con `make bench-attn` (misma semilla, mismos pasos). Comparar por columnas.\n"
         "El pico de VRAM es acumulado desde el arranque del contenedor, no por ejecución.\n\n"
-        "# Resultados\n\n" + table,
+        "# Resultados\n\n" + _TABLE_HEADER + new_rows + "\n",
         encoding="utf-8",
     )
 
@@ -298,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         wait_for_api(args.base_url, args.wait_timeout)
-        flags = fetch_cmd_flags(args.base_url)
+        flags = fetch_cmd_flags_or_empty(args.base_url)
         label = backend_label(flags, args.label.strip() or None)
         width, height, steps, checkpoint = resolve_size(args, args.data_path)
         result = benchmark(

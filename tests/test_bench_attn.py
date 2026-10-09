@@ -74,6 +74,24 @@ class MemoryParsingTests(unittest.TestCase):
         self.assertIsNone(b.ooms_from_memory({"cuda": {}}))
 
 
+class CmdFlagsFallbackTests(unittest.TestCase):
+    def test_returns_empty_when_endpoint_fails(self):
+        orig = b.fetch_cmd_flags
+        b.fetch_cmd_flags = lambda *a, **k: (_ for _ in ()).throw(b.BenchError("HTTP 500"))
+        try:
+            self.assertEqual(b.fetch_cmd_flags_or_empty("http://x"), {})
+        finally:
+            b.fetch_cmd_flags = orig
+
+    def test_passes_through_flags(self):
+        orig = b.fetch_cmd_flags
+        b.fetch_cmd_flags = lambda *a, **k: {"use_ck_attention": True}
+        try:
+            self.assertEqual(b.fetch_cmd_flags_or_empty("http://x"), {"use_ck_attention": True})
+        finally:
+            b.fetch_cmd_flags = orig
+
+
 class FormatTableTests(unittest.TestCase):
     def test_row_and_derived_metrics(self):
         r = b.BenchResult(
@@ -147,7 +165,20 @@ class AppendReportTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             self.assertIn("| flash |", text)
             self.assertIn("| ck-int8 |", text)
-            self.assertEqual(text.count("| Backend |"), 2)
+            self.assertEqual(text.count("| Backend |"), 1)
+
+    def test_preserves_existing_rows_and_no_duplicate_header(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, "report.md")
+            b.append_report(path, [self._result("flash")])
+            text = path.read_text(encoding="utf-8") + "\n| ck-int8 | txt2img | 768x768 | 8 | 1 | 5.00 | 5.00 | 1.60 | 0.00 | 0 |\n"
+            path.write_text(text, encoding="utf-8")
+            b.append_report(path, [self._result("sage")])
+            out = path.read_text(encoding="utf-8")
+            self.assertEqual(out.count("| Backend |"), 1)
+            self.assertIn("| flash |", out)
+            self.assertIn("| ck-int8 |", out)
+            self.assertIn("| sage |", out)
 
 
 if __name__ == "__main__":
