@@ -1,0 +1,21 @@
+--- a/modules/api/models.py
++++ b/modules/api/models.py
+@@ -216,6 +216,18 @@
+ FlagsModel = create_model("Flags", **flags)
+ 
+ 
++# --- Parche docker-neo: saneado de tipos de FlagsModel -------------------------
++# `flags` tipa cada flag como `type(default)`. Los flags numéricos con
++# `default=None` (`--port`, `--reserve-vram`, `--cuda-stream`) quedan como
++# `str | None`, y al devolver un valor numérico FastAPI lanza
++# `ResponseValidationError` -> HTTP 500 en `/sdapi/v1/cmd-flags`. Se relaja a
++# `Any` cualquier campo que haya quedado en ese tipo comodín.
++for _name, _fld in list(FlagsModel.model_fields.items()):
++    if _fld.annotation == (str | None):
++        _fld.annotation = Any
++FlagsModel.model_rebuild(force=True)
++
++
+ class SamplerItem(BaseModel):
+     name: str = Field(title="Name")
+     aliases: list[str] = Field(title="Aliases")

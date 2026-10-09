@@ -5,6 +5,7 @@
 | `krea2-features-backend.patch` | Moodboard + Identity Edit (hooks K2 / Qwen3-VL). Regenerado para Neo `41359cd…` (ver "Segunda regeneración" abajo). |
 | `krea2-features-backend.original.patch` | Original del toolkit (solo referencia; no aplicar en neo actual). |
 | `qwen35-vision-attention-fix.patch` | Fix (2 partes): (1) `attention_function(...)` mal llamado en visión Qwen3-VL → `TypeError: attention_flash() missing k,v,heads` (upstream ya lo arregló por su cuenta en `41359cd`, ver abajo); (2) fallback a `attention_pytorch` cuando el encoder visual corre en CPU (lowvram offload) → `NotImplementedError: flash_attn::_flash_attn_forward ... 'CPU' backend`. |
+| `cmd-flags-numeric-types.patch` | Fix `/sdapi/v1/cmd-flags` (HTTP 500 `ResponseValidationError`): `FlagsModel` tipa cada flag como `type(default)` y los numéricos con `default=None` (`--port`, `--reserve-vram`, `--cuda-stream`) quedan como `str | None`; se relajan a `Any` esos campos. Ver `docs/attention-backends_09-10-2026.md`. |
 
 ---
 
