@@ -1,4 +1,4 @@
-# Última modificación: 2026-10-09
+# Última modificación: 2026-10-10
 
 # Backends de atención en Forge Neo: qué se puede configurar y qué conviene
 
@@ -41,9 +41,9 @@ Comfy-Kitchen INT8  →  Sage  →  Flash  →  xformers  →  PyTorch SDPA  →
 | Backend | Cómo se activa | Coste de integración | Rinde cuando… | Veredicto |
 |---|---|---|---|---|
 | **FlashAttention 2.8.3** | ya activo | — | secuencias medias/largas | **Base actual.** Correcto en sm89. |
-| **CK INT8** (`--use-ck-attention`) | flag runtime, **ya en la imagen** | nulo | secuencias largas (vídeo / ≥1280 px) | **Probar primero.** Medido en Krea2 1280px: 26,3s → 21,9s; a 768px sin diferencia. |
+| **CK INT8** (`--use-ck-attention`) | flag runtime, **ya en la imagen** | nulo | secuencias largas (vídeo / ≥1280 px) | **Ganador medido.** Krea2 1280px: 25,58 → 18,64s (**−27 %**); 1024px: 14,55 → 12,89s (−11 %). |
 | **Sparse Attention** (`sol_attn`) | script en UI, ya horneado | nulo | Wan / ≥1280 px | Útil en vídeo; **sustituye** al backend activo (no se suma). Exige `dim_head=128`, bf16/fp16. |
-| **SageAttention 2.2.0** | instalar en build + `--sage-function` | medio (wheel cp313/cu130) | secuencias largas | **Experimental.** En sm89 el path FP8 por defecto es **inestable**; hay que forzar FP16. |
+| **SageAttention 2.2.0** | instalar en build + `--sage-function` | medio (wheel cp313/cu130) | secuencias largas | **Experimental.** En sm89, `fp16_cuda` da 20,71s a 1280px (mejor que flash, peor que CK); `fp16_triton` es **un lastre** (40,2s). No bit-exacto. |
 | **PyTorch SDPA** (`--use-pytorch-cross-attention`) | flag runtime | nulo | — | Estable, sin ventaja clara frente a Flash aquí. |
 | Nunchaku / bitsandbytes | `--nunchaku` / `--bnb` | alto | cuantización de pesos | Fuera de alcance (fuerza torch distinto). |
 
@@ -123,6 +123,49 @@ Pasos equivalentes si lo haces a mano:
    cuantiza (CK INT8 y Sage). Revisa sobre todo detalle fino y texto.
 5. Si usas Sparse Attention desde la UI, **no** lo combines con `make wan` ni con `ATTN=ck` / `ATTN=sage`: el script
    instala un `optimized_attention_override` que sustituye el backend activo.
+
+## Resultados medidos (2026-10-10)
+
+Banco: `scripts/bench_attn.py` vía `make bench-attn*`, semilla fija 12345, 3 corridas tras 1 de
+calentamiento, Krea 2 Int4 ConvRot v10 Turbo, RTX 4060 8 GB, perfil `8gb` (`--lowvram --cuda-stream`).
+Tabla completa en [`docs/bench-attn_09-10-2026.md`](bench-attn_09-10-2026.md).
+
+| Backend | 1024x1024 (mediana) | 1280x1280 (mediana) | vs flash @1280 | Pico VRAM |
+|---|---|---|---|---|
+| `flash` | 14,55 s | 25,58 s | — | 3,9–4,1 GB |
+| `ck-int8` | **12,89 s** | **18,64 s** | **−27 %** | 3,9–4,1 GB |
+| `sage-fp16_cuda` | 13,78 s | 20,71 s | −19 % | 3,8–4,1 GB |
+| `sage-fp16_triton` | 13,50 s | 40,21 s | +57 % | 4,1 GB |
+
+Conclusiones:
+
+- **CK INT8 gana en ambas resoluciones**, y su ventaja **crece con la resolución** (−11 % a 1024 px,
+  −27 % a 1280 px): confirma que el coste de atención pesa más a más tokens. Es el backend a usar a
+  ≥1280 px, y no exige imagen extra.
+- **Sage `fp16_cuda`** queda en medio; solo tendría sentido frente a CK en secuencias mucho más largas
+  (vídeo), caso que este banco **no cubre** (es `txt2img`).
+- **Sage `fp16_triton` es claramente peor que flash**, incluso a 1024 px: el kernel f16 de Sage en
+  sm89 no está optimizado para esta carga. Descartado.
+- **0 OOM** en todos los casos. El pico de VRAM es acumulado desde el arranque del contenedor, no por
+  corrida (por eso las cifras se solapan).
+
+### Bug de `/sdapi/v1/cmd-flags` (arreglado)
+
+Forge Neo construye `FlagsModel` (en `modules/api/models.py`) tipando cada flag como `type(default)`.
+Los flags numéricos con `default=None` —`--port`, `--reserve-vram`, `--cuda-stream`— quedan como
+`str | None`, y al devolver un valor numérico FastAPI lanza `ResponseValidationError` → **HTTP 500**.
+Afecta a cualquier consumidor del endpoint (nosotros, el propio bench). Se corrige con
+`patches/cmd-flags-numeric-types.patch`, que relaja a `Any` los campos que quedan en ese tipo. Con él
+`/cmd-flags` responde 200 y el benchmark ya no necesita degradar (el *fallback* best-effort en
+`bench_attn.py` se mantiene por robustez).
+
+### Bug de build de Sage (arreglado)
+
+`make build-sage` **nunca instaló SageAttention**: descargaba el wheel como `/tmp/sage.whl` y pip lo
+rechaza (`Invalid wheel filename (wrong number of parts): 'sage'`). Por eso la imagen `:sage` existía
+pero no contenía Sage y jamás se había medido. El `Dockerfile` ahora descarga con el **basename de la
+URL URL-decodificado** (la URL trae `%2B`) y verifica el SHA256; `Dockerfile.cuda12` ya usaba la URL
+directa (funcionaba). Tras el arreglo, `forge-neo:sage` instala `sageattn_qk_int8_pv_fp16_cuda/_triton`.
 
 ## Riesgos y cosas a evitar
 

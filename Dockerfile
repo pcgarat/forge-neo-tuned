@@ -33,14 +33,15 @@ ARG FORGE_NEO_REF=41359cd4b8b89212b3dbad8c9af719160a12ed63
 ARG INSTALL_SAGE=0
 
 WORKDIR /app
-COPY patches/krea2-features-backend.patch patches/qwen35-vision-attention-fix.patch /tmp/
+COPY patches/krea2-features-backend.patch patches/qwen35-vision-attention-fix.patch patches/cmd-flags-numeric-types.patch /tmp/
 RUN git clone --filter=blob:none --no-checkout https://github.com/Haoming02/sd-webui-forge-classic webui \
     && cd webui \
     && git fetch --depth 1 origin "${FORGE_NEO_REF}" \
     && git checkout FETCH_HEAD \
     && git apply --verbose /tmp/krea2-features-backend.patch \
     && git apply --verbose /tmp/qwen35-vision-attention-fix.patch \
-    && rm -f /tmp/krea2-features-backend.patch /tmp/qwen35-vision-attention-fix.patch \
+    && git apply --verbose /tmp/cmd-flags-numeric-types.patch \
+    && rm -f /tmp/krea2-features-backend.patch /tmp/qwen35-vision-attention-fix.patch /tmp/cmd-flags-numeric-types.patch \
     && rm -rf .git
 
 WORKDIR /app/webui
@@ -108,10 +109,16 @@ RUN python -m pip install --no-cache-dir \
 # (fallos de launch / NaN); en runtime hay que forzar `--sage-function fp16_cuda`|`fp16_triton`.
 ARG SAGE_WHEEL_URL=https://github.com/snw35/sageattention-wheel/releases/download/cu12-2.2.0-cu13-2.2.0/sageattention-2.2.0%2Bcu13-cp313-cp313-linux_x86_64.whl
 ARG SAGE_WHEEL_SHA256=c19e3bd8aef99fdb4916bc0afb58d1ced32a9fc854fc1d1b17dc9da9e880a4b9
+# OJO: pip solo acepta un wheel local si el nombre de fichero es canónico
+# (`name-version-...whl`, con `+` literal en la versión). Por eso se descarga con el
+# basename de la URL ya URL-decodificado (la URL trae `%2B`) en vez de un nombre fijo:
+# `pip install /tmp/sage.whl` fallaba con "Invalid wheel filename".
 RUN if [ "$INSTALL_SAGE" = "1" ]; then \
-      python -c "import urllib.request,hashlib,sys; urllib.request.urlretrieve(sys.argv[1],'/tmp/sage.whl'); h=hashlib.sha256(open('/tmp/sage.whl','rb').read()).hexdigest(); sys.exit(0 if h==sys.argv[2] else 'SAGE_SHA256 mismatch: '+h)" "$SAGE_WHEEL_URL" "$SAGE_WHEEL_SHA256" \
-      && python -m pip install --no-cache-dir --no-deps /tmp/sage.whl \
-      && rm -f /tmp/sage.whl \
+      whl="/tmp/$(python -c "import sys,os,urllib.parse; print(urllib.parse.unquote(os.path.basename(sys.argv[1])))" "$SAGE_WHEEL_URL")" \
+      && python -c "import urllib.request,sys; urllib.request.urlretrieve(sys.argv[1],sys.argv[2])" "$SAGE_WHEEL_URL" "$whl" \
+      && python -c "import hashlib,sys; h=hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest(); sys.exit(0 if h==sys.argv[2] else 'SAGE_SHA256 mismatch: '+h)" "$whl" "$SAGE_WHEEL_SHA256" \
+      && python -m pip install --no-cache-dir --no-deps "$whl" \
+      && rm -f "$whl" \
       && python -c "from sageattention import sageattn; print('sageattention OK')"; \
     fi
 
