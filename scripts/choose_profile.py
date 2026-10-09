@@ -99,10 +99,12 @@ def recommend(a: Answers) -> Recommendation:
 
 
 def _ask(prompt: str, default, cast=str):
+    # El prompt va a stderr: stdout lo captura el `eval` del Makefile y se lo tragaría.
     suffix = f" [{default}]" if default not in (None, "") else ""
     while True:
+        print(f"{prompt}{suffix}: ", end="", file=sys.stderr, flush=True)
         try:
-            raw = input(f"{prompt}{suffix}: ").strip()
+            raw = input().strip()
         except EOFError:
             print(file=sys.stderr)
             return default

@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -77,6 +80,19 @@ class MakeLinesTests(unittest.TestCase):
     def test_ck_with_warmup(self):
         rec = c.Recommendation(attn="ck", attn_reason="", warmup=True)
         self.assertEqual(rec.make_lines(), ["ATTN=ck", "VRAM=auto", "WARMUP=1"])
+
+
+class AskStreamTests(unittest.TestCase):
+    """El prompt debe ir a stderr: stdout lo captura el `eval` del Makefile."""
+
+    def test_prompt_goes_to_stderr_not_stdout(self):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("builtins.input", return_value="1280"), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            value = c._ask("Lado mayor", 1024, c.parse_resolution)
+        self.assertEqual(value, 1280)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("Lado mayor", err.getvalue())
 
 
 if __name__ == "__main__":
