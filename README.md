@@ -54,9 +54,12 @@ Con `--skip-install`, cada extensión no puede instalar lo suyo; se hornea a pro
 ### Operativa
 
 - Presets por modelo: `make klein` / `krea2` / `wan` (VRAM auto + atención recomendada) y `make run ATTN= VRAM=`
+- `make up-interactive` deriva ejes (modelo/tamaño/imagen-vídeo/API) en un asistente; `make preflight-gpu` valida driver y `nvidia-persistenced` antes de arrancar
+- Estado en `/data`: base SQLite de Agent Scheduler y `ui-config.json` (State Manager) sobreviven al contenedor
+- Perfil 8 GB con `--cuda-stream` + `--pin-shared-memory` (memlock holgado en compose) para solapar el trasiego RAM↔VRAM
 - `PUID`/`PGID` + `setpriv` (output no queda root)
 - Layout único `forge-data/` local ↔ RunPod
-- Variantes `:cuda12` y `:slim` para hosts/RunPod restrictivos
+- Variantes `:cuda12`, `:slim` y `:sage` (backend SageAttention opt-in) para hosts/RunPod restrictivos
 
 ## Requisitos
 
@@ -111,17 +114,20 @@ Guía: [docs/integracion-krea2-moodboard-identity-edit-forge-neo_23-07-2026.md](
 | `make run ATTN= VRAM=` | Arranque manual con los ejes a la carta (`ATTN=flash|ck|sage|sage-triton`, `VRAM=auto|8gb|normal|high`) |
 | `make up-interactive` | Asistente: pregunta modelo, tamaño, imagen/vídeo… y arranca con lo recomendado |
 | `make up` | Arranca con el `EXTRA_ARGS` del `.env`, sin ejes |
+| `make preflight-gpu` | Valida driver NVIDIA y socket de `nvidia-persistenced` (evita fallos crípticos de runc) |
 | `make chatbot` | Perfil 8 GB + warmup `torch.compile` para API |
 | `make bench-attn` / `bench-attn-sweep` | Medir backends de atención (misma semilla) → informe md |
 | `make bench-offload` / `bench-offload-sweep` | Medir trasiego de pesos RAM↔VRAM (`--cuda-stream` on/off) → informe md |
 | `make iib-access` | Permisos IIB a salidas |
 | `make reactor-fix` | Reafirma ORT-GPU en contenedor vivo |
 | `make seed-extensions` | Siembra `extensions/` si faltan |
+| `make test-choose-profile` / `test-bench` / `test-bench-offload` | Tests de los helpers (sin GPU) |
 
-`ATTN=sage`/`sage-triton` exigen `make build-sage` antes (imagen `:sage`). `make help` agrupa todas
-las órdenes con su cuándo; detalle en [`docs/guia-perfiles_09-10-2026.md`](docs/guia-perfiles_09-10-2026.md).
+`ATTN=sage`/`sage-triton` exigen `make build-sage` antes (imagen `:sage`, publicable con `make push-sage`).
+`make help` agrupa todas las órdenes con su cuándo; detalle en [`docs/guia-perfiles_09-10-2026.md`](docs/guia-perfiles_09-10-2026.md).
 
-`.env`: `DATA_PATH`, `EXTENSIONS_PATH`, `PUID`/`PGID`, `EXTRA_ARGS`, subdirs de modelos. Tras cambios: `make restart`.
+`.env`: `DATA_PATH`, `EXTENSIONS_PATH`, `PUID`/`PGID`, `EXTRA_ARGS`, subdirs de modelos e IIB
+(`IIB_ACCESS_CONTROL`, `IIB_ACCESS_CONTROL_ALLOWED_PATHS`). Tras cambios: `make restart`.
 
 **ReActor:** [codeberg.org/Gourieff/sd-webui-reactor](https://codeberg.org/Gourieff/sd-webui-reactor) — no el fork `-sfw` (ORT 1.17.1).
 
@@ -134,6 +140,7 @@ docker login ghcr.io -u TU_GITHUB_USER
 make push            # :latest
 make push-cuda12     # :cuda12
 make push-slim       # :slim
+make push-sage       # :sage (backend SageAttention)
 ```
 
 Pod = esta imagen; volumen en `/workspace` → datos en `/workspace/forge-data`; HTTP **7860**.
@@ -151,10 +158,12 @@ Pod = esta imagen; volumen en `/workspace` → datos en `/workspace/forge-data`;
 | [Planteamiento](docs/planteamiento-docker-forge-neo_28-02-2025.md) | Arquitectura de imagen |
 | [models.md](models.md) | Layout de modelos |
 | [`builtin-extensions/`](builtin-extensions/) · [`extensions/`](extensions/) | Qué va en imagen vs volumen |
+| [`.cursor/skills/`](.cursor/skills/) | Skills Forge Neo (extensiones compatibles y custom scripts) para el asistente |
 
 ## Upstream
 
 - Forge Neo: [Haoming02/sd-webui-forge-classic](https://github.com/Haoming02/sd-webui-forge-classic)
 - Toolkit Krea2: [RedNodeAI/forge-neo-krea2-toolkit](https://github.com/RedNodeAI/forge-neo-krea2-toolkit)
+- SageAttention (wheel cp313/cu13): [snw35/sageattention-wheel](https://github.com/snw35/sageattention-wheel)
 
 Respeta licencias de Forge, extensiones y modelos.
