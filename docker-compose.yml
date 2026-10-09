@@ -28,7 +28,7 @@ services:
       - PGID=${PGID:-1000}
       - VIDEO_GID=${VIDEO_GID:-44}
       - RENDER_GID=${RENDER_GID:-992}
-      - COMMANDLINE_ARGS=--listen --port 7860 --data-dir /data --model-ref /data/${MODELS_SUBDIR:-models} --ckpt-dirs /data/${MODELS_SUBDIR:-models}/${CHECKPOINT_SUBDIR:-Stable-diffusion} --text-encoder-dirs /data/${MODELS_SUBDIR:-models}/${TEXT_ENCODER_SUBDIR:-text_encoder} --gradio-allowed-path /app/webui --gradio-allowed-path /data --enable-insecure-extension-access --skip-prepare-environment --skip-install --api
+      - COMMANDLINE_ARGS=--listen --port 7860 --data-dir /data --model-ref /data/${MODELS_SUBDIR:-models} --ckpt-dirs /data/${MODELS_SUBDIR:-models}/${CHECKPOINT_SUBDIR:-Stable-diffusion} --text-encoder-dirs /data/${MODELS_SUBDIR:-models}/${TEXT_ENCODER_SUBDIR:-text_encoder} --gradio-allowed-path /app/webui --gradio-allowed-path /data --agent-scheduler-sqlite-file /data/task_scheduler.sqlite3 --enable-insecure-extension-access --skip-prepare-environment --skip-install --api
       # Pisa env_file: así `make klein9b` / `make chatbot` pueden inyectar EXTRA_ARGS.
       - EXTRA_ARGS=${EXTRA_ARGS:-}
       - NVIDIA_VISIBLE_DEVICES=all

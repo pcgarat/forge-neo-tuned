@@ -145,7 +145,7 @@ COPY --from=builder /app/webui /app/webui
 # El README.md de esta carpeta queda como fichero suelto e inofensivo.
 COPY builtin-extensions/ /app/webui/extensions-builtin/
 
-ENV COMMANDLINE_ARGS="--listen --port 7860 --data-dir /data --gradio-allowed-path /app/webui --gradio-allowed-path /data --enable-insecure-extension-access --skip-prepare-environment --skip-install --api"
+ENV COMMANDLINE_ARGS="--listen --port 7860 --data-dir /data --gradio-allowed-path /app/webui --gradio-allowed-path /data --agent-scheduler-sqlite-file /data/task_scheduler.sqlite3 --enable-insecure-extension-access --skip-prepare-environment --skip-install --api"
 EXPOSE 7860
 VOLUME ["/data"]
 
