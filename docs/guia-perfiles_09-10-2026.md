@@ -33,6 +33,44 @@ Variables:
 
 `make up` ignora los ejes: arranca con el `EXTRA_ARGS` del `.env` (RunPod o perfiles propios).
 
+## El asistente: `make up-interactive`
+
+Si no quieres razonar los ejes a mano, este target **pregunta lo que de verdad cambia la decisión** y
+arranca con lo recomendado:
+
+```bash
+$ make up-interactive
+¿Qué modelo vas a usar? (klein/krea2/wan) [klein]: krea2
+¿Imagen o vídeo? (imagen/video) [imagen]:
+¿Lado mayor de la imagen en píxeles (ej. 1024, 1280) [1024]: 1280
+¿Secuencias largas? (Moodboard/Identity Edit, muchas referencias) (s/n) [n]:
+¿Lotes repetidos por API a la misma resolución? (s/n) [n]:
+Configuración recomendada
+  Modelo:   Krea 2 turbo (imagen)
+  Tamaño:   lado mayor 1280 px
+  Atención: ck — imagen a 1280 px: CK INT8 rinde (26,3→21,9 s medidos)
+  VRAM:     auto (nvidia-smi decide el perfil)
+  Warmup:   no
+Notas:
+  - No añadas --fast-fp8 (falla en Krea 2).
+  - CK INT8 no es bit-exacto: a igual semilla la imagen cambia.
+
+Arrancando con: make run ATTN=ck VRAM=auto
+```
+
+Las preguntas y su efecto:
+
+| Pregunta | Decide |
+|---|---|
+| Modelo | notas (Krea 2 no `--fast-fp8`) y si es vídeo por defecto |
+| Imagen o vídeo | vídeo ⇒ `ATTN=ck` |
+| Lado mayor | ≥1280 px ⇒ `ATTN=ck` en imagen |
+| Secuencias largas (Moodboard/Edit) | ⇒ `ATTN=ck` y aviso de VRAM en Krea 2 |
+| API a resolución fija | ⇒ warmup `torch.compile` tras arrancar |
+
+Para automatizar (sin preguntas): `make up-interactive MODEL=krea2 RES=1280 API=1` (acepta `KIND=`,
+`LONGSEQ=1`). `make test-choose-profile` prueba las reglas sin GPU.
+
 ## Matriz de recomendación
 
 | Modelo | Orden | Atención por defecto | Cuándo y por qué |

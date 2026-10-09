@@ -109,6 +109,7 @@ Guía: [docs/integracion-krea2-moodboard-identity-edit-forge-neo_23-07-2026.md](
 | `make krea2` | Krea 2 turbo: VRAM auto + `flash` (prueba `ATTN=ck` a ≥1280 px) |
 | `make wan` | Wan 2.2 turbo (vídeo): VRAM auto + `ck` (INT8) |
 | `make run ATTN= VRAM=` | Arranque manual con los ejes a la carta (`ATTN=flash|ck|sage|sage-triton`, `VRAM=auto|8gb|normal|high`) |
+| `make up-interactive` | Asistente: pregunta modelo, tamaño, imagen/vídeo… y arranca con lo recomendado |
 | `make up` | Arranca con el `EXTRA_ARGS` del `.env`, sin ejes |
 | `make chatbot` | Perfil 8 GB + warmup `torch.compile` para API |
 | `make bench-attn` / `bench-attn-sweep` | Medir backends de atención (misma semilla) → informe md |

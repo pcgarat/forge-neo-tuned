@@ -18,6 +18,8 @@ PORT     = 7860
 #   normal|high fuerza normalvram / highvram.
 ATTN ?= flash
 VRAM ?= auto
+# WARMUP=1 ejecuta chatbot-warmup (torch.compile) tras arrancar; lo usa `make up-interactive`.
+WARMUP ?=
 
 # STREAM=off quita --cuda-stream del perfil 8 GB (lo usa bench-offload-sweep).
 STREAM ?= on
@@ -55,7 +57,7 @@ ATTN_FLAGS = $(strip $(if $(filter ck,$(ATTN)),--use-ck-attention,$(if $(filter 
 ATTN_IMAGE = $(if $(filter sage sage-triton,$(ATTN)),$(FORGE_IMAGE_SAGE),$(FORGE_IMAGE))
 
 .PHONY: help build build-no-cache build-cuda12 build-slim build-sage push push-cuda12 push-slim push-sage \
-        run up down restart logs shell ps clean klein krea2 wan chatbot chatbot-warmup test-warmup \
+        run up up-interactive down restart logs shell ps clean klein krea2 wan chatbot chatbot-warmup test-warmup test-choose-profile \
         workspace seed-extensions preflight-gpu preflight-gpu-check \
         bench-attn bench-attn-sweep bench-attn-flash bench-attn-ck bench-attn-sage bench-attn-sage-triton test-bench \
         bench-offload bench-offload-sweep bench-offload-sweep-nostream bench-offload-sweep-stream test-bench-offload \
@@ -75,6 +77,7 @@ help:
 	@echo "ARRANQUE MANUAL"
 	@echo "  make run      Arranca con VRAM y ATTN a mano (mismos ejes que los presets)."
 	@echo "  make up       Arranca con el EXTRA_ARGS del .env, sin ejes (RunPod / perfiles propios)."
+	@echo "  make up-interactive  Pregunta modelo, tamaño, imagen/vídeo… y arranca con lo recomendado."
 	@echo "  make down     Para y elimina el contenedor."
 	@echo "  make restart  down + up (por defecto con el perfil del .env)."
 	@echo "  make logs     Sigue los logs del servicio (Ctrl+C para salir)."
@@ -106,6 +109,7 @@ help:
 	@echo "  make chatbot         Perfil 8 GB + warmup torch.compile al size del último gen (API)"
 	@echo "  make chatbot-warmup  Solo warmup (Forge ya tiene que estar arriba)"
 	@echo "  make test-warmup     Tests del parser/payload de chatbot-warmup"
+	@echo "  make test-choose-profile  Tests del asistente 'make up-interactive'"
 	@echo ""
 	@echo "BENCHMARKS (anexan filas a docs/*.md; requieren GPU)"
 	@echo "  make bench-attn         Mide N gens (semilla fija) del backend activo"
@@ -158,12 +162,34 @@ _launch-model: workspace
 	echo "  Imagen:   $(ATTN_IMAGE)"; \
 	export EXTRA_ARGS="$$extra $(ATTN_FLAGS)" FORGE_IMAGE="$(ATTN_IMAGE)"; \
 	$(COMPOSE) up -d$(if $(BENCH_DETACH),, && $(MAKE) --no-print-directory logs)
+	@if [ -n "$(WARMUP)" ]; then $(MAKE) --no-print-directory chatbot-warmup; fi
 
 # Presets por modelo: fijan el ATTN recomendado y detectan VRAM. Override con ATTN=/VRAM=.
 klein: ATTN = flash
 krea2: ATTN = flash
 wan:   ATTN = ck
 klein krea2 wan run: _launch-model
+
+# Asistente: pregunta modelo, tamaño, imagen/vídeo, API… para resolver ATTN/VRAM/warmup.
+# El script imprime el resumen a stderr y los VAR=valor a stdout; el eval los consume.
+# Si pasas MODEL= no pregunta (opcional RES=, KIND=, LONGSEQ=1, API=1).
+MODEL ?=
+RES   ?=
+KIND  ?=
+LONGSEQ ?=
+API     ?=
+up-interactive:
+	@args=""; \
+	[ -n "$(MODEL)" ] && args="$$args --model $(MODEL)"; \
+	[ -n "$(RES)" ] && args="$$args --resolution $(RES)"; \
+	[ -n "$(KIND)" ] && args="$$args --kind $(KIND)"; \
+	[ -n "$(LONGSEQ)" ] && args="$$args --long-sequence"; \
+	[ -n "$(API)" ] && args="$$args --api"; \
+	eval "$$(python3 $(CURDIR)/scripts/choose_profile.py --make $$args)"; \
+	$(MAKE) --no-print-directory run ATTN=$$ATTN VRAM=$$VRAM WARMUP=$$WARMUP
+
+test-choose-profile:
+	python3 -m unittest tests.test_choose_profile -v
 
 build:
 	$(COMPOSE) build
