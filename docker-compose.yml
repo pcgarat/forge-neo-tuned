@@ -7,7 +7,7 @@
 services:
   forge-neo:
     build: .
-    image: forge-neo:latest
+    image: ${FORGE_IMAGE:-forge-neo:latest}
     container_name: forge-neo
     restart: unless-stopped
     # Arranca como root solo para el entrypoint (chown + setpriv → PUID:PGID).

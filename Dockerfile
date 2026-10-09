@@ -27,6 +27,11 @@ RUN python3.13 -m ensurepip --upgrade
 
 # Pin de Forge Neo compatible con patches/krea2-features-backend.patch (ver patches/README.md).
 ARG FORGE_NEO_REF=41359cd4b8b89212b3dbad8c9af719160a12ed63
+
+# SageAttention es un backend de atención opcional (ver docs/attention-backends_09-10-2026.md).
+# INSTALL_SAGE=1 hornea el wheel en la imagen; por defecto 0 (imagen idéntica a la actual).
+ARG INSTALL_SAGE=0
+
 WORKDIR /app
 COPY patches/krea2-features-backend.patch patches/qwen35-vision-attention-fix.patch /tmp/
 RUN git clone --filter=blob:none --no-checkout https://github.com/Haoming02/sd-webui-forge-classic webui \
@@ -95,6 +100,21 @@ RUN python -m pip install --no-cache-dir \
       'openai' \
     && python -c "import torch; assert '2.' in torch.__version__, torch.__version__"
 
+# SageAttention 2.2.0 (opt-in con --build-arg INSTALL_SAGE=1).
+# Wheel precompilado (Linux cp313, CUDA 13) de snw35/sageattention-wheel; trae kernels sm80/89/90/120.
+# OJO: no usar el flag `--sage` de launch.py; ese instala `sageattention==2.2.0` desde PyPI, que
+# solo publica hasta 1.0.6 (sdist) → fallaría el build. Por eso se instala el wheel explícitamente.
+# En sm89 (RTX 40xx) el kernel por defecto (`sageattn`) elige el path FP8, reportado inestable
+# (fallos de launch / NaN); en runtime hay que forzar `--sage-function fp16_cuda`|`fp16_triton`.
+ARG SAGE_WHEEL_URL=https://github.com/snw35/sageattention-wheel/releases/download/cu12-2.2.0-cu13-2.2.0/sageattention-2.2.0%2Bcu13-cp313-cp313-linux_x86_64.whl
+ARG SAGE_WHEEL_SHA256=c19e3bd8aef99fdb4916bc0afb58d1ced32a9fc854fc1d1b17dc9da9e880a4b9
+RUN if [ "$INSTALL_SAGE" = "1" ]; then \
+      python -c "import urllib.request,hashlib,sys; urllib.request.urlretrieve(sys.argv[1],'/tmp/sage.whl'); h=hashlib.sha256(open('/tmp/sage.whl','rb').read()).hexdigest(); sys.exit(0 if h==sys.argv[2] else 'SAGE_SHA256 mismatch: '+h)" "$SAGE_WHEEL_URL" "$SAGE_WHEEL_SHA256" \
+      && python -m pip install --no-cache-dir --no-deps /tmp/sage.whl \
+      && rm -f /tmp/sage.whl \
+      && python -c "from sageattention import sageattn; print('sageattention OK')"; \
+    fi
+
 # Limpieza agresiva para reducir tamaño (RunPod tiene límite de disco para la imagen)
 # No strippear onnxruntime: rompe providers CUDA.
 # No borrar */botocore/docs: botocore lo necesita si algún día se instala boto3.
@@ -104,7 +124,7 @@ RUN find /usr/local/lib/python3.13 -type d -name __pycache__ -exec rm -rf {} + 2
     && find /usr/local/lib/python3.13 -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/local/lib/python3.13 -type d \( -name 'docs' -o -name 'doc' \) ! -path '*/botocore/*' -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/local/lib/python3.13 -name '*.a' -delete 2>/dev/null || true \
-    && find /usr/local/lib/python3.13 -name '*.so' ! -path '*/onnxruntime/*' -exec strip --strip-unneeded {} \; 2>/dev/null || true \
+    && find /usr/local/lib/python3.13 -name '*.so' ! -path '*/onnxruntime/*' ! -path '*/sageattention/*' -exec strip --strip-unneeded {} \; 2>/dev/null || true \
     && rm -rf /usr/local/lib/python3.13/site-packages/torch/share 2>/dev/null || true \
     && find /app/webui -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true \
     && find /app/webui -name '*.pyc' -delete 2>/dev/null || true

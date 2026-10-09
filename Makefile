@@ -25,7 +25,19 @@ ARGS_8GB = --cuda-malloc --lowvram --fp8_e4m3fn-unet --reserve-vram 2 --pin-shar
 # Ojo: a igual semilla produce una imagen distinta, no es intercambiable a mitad de un trabajo.
 ARGS_INT8_ATTN = $(ARGS_8GB) --use-ck-attention
 
-.PHONY: help build build-no-cache build-cuda12 build-slim push push-cuda12 push-slim up down restart logs shell workspace preflight-gpu preflight-gpu-check seed-extensions ps clean klein9b lowvram wan chatbot chatbot-warmup test-warmup iib-access krea2-ext krea2-depth-ext reactor-fix install-docker
+# Perfil 8 GB + SageAttention forzado a FP16 (el path FP8 por defecto es inestable en sm89).
+# Requiere la imagen horneada con Sage (make build-sage); no basta con flags de runtime.
+# fp16_cuda usa los kernels CUDA precompilados (_qattn_sm89); fp16_triton usa los Triton.
+# Nota: Sage en sm89 no tiene kernel f16 con acumulador f16 -> `sageattn_qk_int8_pv_fp16_cuda`
+# con pv_accum_dtype="fp16" cae a `sm80_compile` en tiempo de import; puede fallar en sm89.
+ARGS_SAGE = $(ARGS_8GB) --sage-function fp16_cuda
+ARGS_SAGE_TRITON = $(ARGS_8GB) --sage-function fp16_triton
+
+# Imagen a arrancar: por defecto la estándar. `make sage` usa la variante con SageAttention.
+FORGE_IMAGE ?= forge-neo:latest
+FORGE_IMAGE_SAGE ?= forge-neo:sage
+
+.PHONY: help build build-no-cache build-cuda12 build-slim build-sage push push-cuda12 push-slim push-sage up down restart logs shell workspace preflight-gpu preflight-gpu-check seed-extensions ps clean klein9b lowvram wan ck sage sage-triton chatbot chatbot-warmup test-warmup bench-attn bench-attn-sweep bench-attn-flash bench-attn-ck bench-attn-sage bench-attn-sage-triton test-bench iib-access krea2-ext krea2-depth-ext reactor-fix install-docker
 
 help:
 	@echo "sd-webui-forge-neo — objetivos disponibles:"
@@ -37,10 +49,18 @@ help:
 	@echo "  make restart       — down + up y seguir logs (Ctrl+C para salir)"
 	@echo "  make klein9b       — Arrancar optimizado para Klein 9B y seguir logs (Ctrl+C para salir)"
 	@echo "  make lowvram       — Arrancar con perfil 8 GB y seguir logs (Ctrl+C para salir)"
-	@echo "  make wan           — Perfil 8 GB + atención INT8 (vídeo Wan / alta resolución)"
+	@echo "  make wan           — Perfil 8 GB + atención INT8 de Comfy-Kitchen (vídeo Wan / alta resolución)"
+	@echo "  make ck            — Alias de 'make wan' (atención INT8 de Comfy-Kitchen, sin build)"
+	@echo "  make sage          — Perfil 8 GB + SageAttention fp16_cuda (requiere 'make build-sage' antes)"
+	@echo "  make sage-triton   — Igual que 'make sage' pero con el kernel Triton (fp16_triton)"
 	@echo "  make chatbot       — Perfil 8 GB + warmup torch.compile (guard_filter_fn) al size del último gen"
 	@echo "  make chatbot-warmup — Solo warmup (Forge ya tiene que estar arriba)"
 	@echo "  make test-warmup   — Tests del parser/payload de chatbot-warmup"
+	@echo "  make bench-attn    — Medir N gens (semilla fija) del backend activo y anexar fila al informe"
+	@echo "  make bench-attn-sweep — Comparar base (flash) vs CK INT8 reiniciando y midiendo (requiere GPU)"
+	@echo "  make bench-attn-sage — Mide SageAttention fp16_cuda (requiere 'make build-sage')"
+	@echo "  make bench-attn-sage-triton — Mide SageAttention fp16_triton"
+	@echo "  make test-bench    — Tests del benchmark de atención"
 	@echo "  make logs          — Ver logs del servicio (Ctrl+C para salir)"
 	@echo "  make shell         — Abrir una shell dentro del contenedor"
 	@echo "  make workspace     — Crear árbol de datos y sembrar extensions/ si faltan (antes del primer up)"
@@ -58,6 +78,8 @@ help:
 	@echo "  make push-cuda12   — Construir variante CUDA 12, etiquetar y subir (REGISTRY_IMAGE_CUDA12)"
 	@echo "  make build-slim    — Construir variante slim (sin onnxruntime-gpu/nunchaku, menos tamaño para RunPod)"
 	@echo "  make push-slim     — Construir slim, etiquetar y subir (REGISTRY_IMAGE, tag :slim)"
+	@echo "  make build-sage    — Construir imagen estándar + SageAttention horneado (tag :sage; no pisa :latest)"
+	@echo "  make push-sage     — Construir variante Sage, etiquetar y subir (REGISTRY_IMAGE, tag :sage)"
 	@echo ""
 	@echo "WebUI: http://localhost:$(PORT)   API: http://localhost:$(PORT)/docs"
 
@@ -79,9 +101,15 @@ build-cuda12:
 build-slim:
 	docker build --build-arg BUILD_SLIM=1 -t forge-neo:slim .
 
+# Variante con SageAttention horneado (backend opcional; ver docs/attention-backends_09-10-2026.md).
+# No pisa :latest; arranca con `make sage`.
+build-sage:
+	DOCKER_BUILDKIT=1 docker build --build-arg INSTALL_SAGE=1 -t $(FORGE_IMAGE_SAGE) .
+
 up: workspace
 	@$(MAKE) --no-print-directory preflight-gpu
-	@$(ENV_LOAD) && $(COMPOSE) up -d && $(MAKE) logs
+	@$(ENV_LOAD) && $(COMPOSE) up -d
+	@$(if $(BENCH_DETACH),,@$(MAKE) logs)
 
 down:
 	$(COMPOSE) down
@@ -145,12 +173,34 @@ klein9b: workspace
 lowvram: workspace
 	@$(MAKE) --no-print-directory preflight-gpu
 	@echo "Perfil 8GB: $(ARGS_8GB)"
-	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_8GB)" && $(COMPOSE) up -d && $(MAKE) logs
+	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_8GB)" && $(COMPOSE) up -d
+	@$(if $(BENCH_DETACH),,@$(MAKE) logs)
 
 wan: workspace
 	@$(MAKE) --no-print-directory preflight-gpu
 	@echo "Perfil 8GB + atención INT8: $(ARGS_INT8_ATTN)"
-	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_INT8_ATTN)" && $(COMPOSE) up -d && $(MAKE) logs
+	@$(ENV_LOAD) && export EXTRA_ARGS="$(ARGS_INT8_ATTN)" && $(COMPOSE) up -d
+	@$(if $(BENCH_DETACH),,@$(MAKE) logs)
+
+# Atención INT8 de Comfy-Kitchen. Mismo flag que `make wan`; alias con nombre explícito.
+# No requiere rebuild: el módulo comfy_kitchen ya viene en la imagen.
+ck: wan
+
+# SageAttention fp16_cuda. Requiere la imagen con Sage (`make build-sage`).
+# Fuerza FP16: en sm89 el path FP8 por defecto (`auto`) es inestable.
+sage: workspace
+	@$(MAKE) --no-print-directory preflight-gpu
+	@echo "Perfil 8GB + SageAttention fp16_cuda: $(ARGS_SAGE)"
+	@$(ENV_LOAD) && export FORGE_IMAGE="$(FORGE_IMAGE_SAGE)" EXTRA_ARGS="$(ARGS_SAGE)" && $(COMPOSE) up -d
+	@$(if $(BENCH_DETACH),,@$(MAKE) logs)
+
+# Sage por Triton (kernels Triton, sin depender de los CUDA precompilados). Solo lo usa Triton,
+# que ya viene en la imagen; probar si el kernel CUDA fp16 diera problemas en sm89.
+sage-triton: workspace
+	@$(MAKE) --no-print-directory preflight-gpu
+	@echo "Perfil 8GB + SageAttention fp16_triton: $(ARGS_SAGE_TRITON)"
+	@$(ENV_LOAD) && export FORGE_IMAGE="$(FORGE_IMAGE_SAGE)" EXTRA_ARGS="$(ARGS_SAGE_TRITON)" && $(COMPOSE) up -d
+	@$(if $(BENCH_DETACH),,@$(MAKE) logs)
 
 # Llamadas API del chatBot: mismo modelo/size, N escenas seguidas.
 # 8 GB + compile guard_filter_fn (compatible con --cuda-malloc; max-autotune no lo es).
@@ -167,6 +217,48 @@ chatbot-warmup:
 
 test-warmup:
 	python3 -m unittest tests.test_chatbot_warmup -v
+
+# --- Benchmark de backends de atención -------------------------------------
+# Mide N generaciones idénticas contra el Forge que ya está arriba y anexa una fila
+# al informe. No reinicia nada: orquesta `make bench-attn-sweep` (requiere GPU).
+BENCH_ARGS   ?=
+BENCH_REPORT ?= docs/bench-attn_09-10-2026.md
+
+bench-attn:
+	@$(ENV_LOAD); \
+	data="$${DATA_PATH:-/workspace/forge-data}"; \
+	python3 "$(CURDIR)/scripts/bench_attn.py" \
+	  --data-path "$$data" \
+	  --base-url "http://127.0.0.1:$(PORT)" \
+	  --out "$(CURDIR)/$(BENCH_REPORT)" \
+	  $(BENCH_ARGS)
+
+test-bench:
+	python3 -m unittest tests.test_bench_attn -v
+
+# Compara base (flash) vs CK INT8. Requiere GPU operativa (nvidia-smi). Intervalo configurable.
+BENCH_SLEEP ?= 30
+bench-attn-sweep: bench-attn-flash bench-attn-ck
+
+bench-attn-flash:
+	@$(MAKE) --no-print-directory lowvram BENCH_DETACH=1
+	@sleep $(BENCH_SLEEP)
+	@$(MAKE) --no-print-directory bench-attn BENCH_ARGS="$(BENCH_ARGS) --label flash"
+
+bench-attn-ck:
+	@$(MAKE) --no-print-directory ck BENCH_DETACH=1
+	@sleep $(BENCH_SLEEP)
+	@$(MAKE) --no-print-directory bench-attn BENCH_ARGS="$(BENCH_ARGS) --label ck-int8"
+
+bench-attn-sage: build-sage
+	@$(MAKE) --no-print-directory sage BENCH_DETACH=1
+	@sleep $(BENCH_SLEEP)
+	@$(MAKE) --no-print-directory bench-attn BENCH_ARGS="$(BENCH_ARGS) --label sage-fp16_cuda"
+
+bench-attn-sage-triton: build-sage
+	@$(MAKE) --no-print-directory sage-triton BENCH_DETACH=1
+	@sleep $(BENCH_SLEEP)
+	@$(MAKE) --no-print-directory bench-attn BENCH_ARGS="$(BENCH_ARGS) --label sage-fp16_triton"
 
 logs:
 	$(COMPOSE) logs -f $(SERVICE)
@@ -329,6 +421,12 @@ push-slim: build-slim
 	$(eval slim_image := $(patsubst %:latest,%:slim,$(REGISTRY_IMAGE)))
 	docker tag forge-neo:slim $(slim_image)
 	docker push $(slim_image)
+
+# Variante Sage: subir como :sage
+push-sage: build-sage
+	$(eval sage_image := $(patsubst %:latest,%:sage,$(REGISTRY_IMAGE)))
+	docker tag $(FORGE_IMAGE_SAGE) $(sage_image)
+	docker push $(sage_image)
 
 # Instala Docker Engine y Docker Compose (plugin) desde el repo oficial. Solo Ubuntu/Debian.
 # Usa la última versión estable del repo; para fijar: make install-docker DOCKER_CE_VERSION=5:29.2.1-1~ubuntu.24.04~noble

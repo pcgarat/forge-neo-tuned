@@ -27,6 +27,11 @@ RUN python3.13 -m ensurepip --upgrade
 
 # Pin de Forge Neo compatible con patches/krea2-features-backend.patch (ver patches/README.md).
 ARG FORGE_NEO_REF=41359cd4b8b89212b3dbad8c9af719160a12ed63
+
+# SageAttention opcional (ver Dockerfile principal y docs/attention-backends_09-10-2026.md).
+# En la variante CUDA 12 se instala el wheel +cu12, compilado contra CUDA 12.x.
+ARG INSTALL_SAGE=0
+
 WORKDIR /app
 COPY patches/krea2-features-backend.patch patches/qwen35-vision-attention-fix.patch /tmp/
 RUN git clone --filter=blob:none --no-checkout https://github.com/Haoming02/sd-webui-forge-classic webui \
@@ -81,10 +86,18 @@ RUN python -m pip install --no-cache-dir \
       'openai' \
     && python -c "import torch; assert '2.' in torch.__version__, torch.__version__"
 
+# SageAttention 2.2.0 (opt-in con --build-arg INSTALL_SAGE=1). Wheel +cu12 para este stack.
+# No usar el flag `--sage` de launch.py (instala desde PyPI, que no publica 2.2.0).
+ARG SAGE_WHEEL_URL=https://github.com/snw35/sageattention-wheel/releases/download/cu12-2.2.0-cu13-2.2.0/sageattention-2.2.0%2Bcu12-cp313-cp313-linux_x86_64.whl
+RUN if [ "$INSTALL_SAGE" = "1" ]; then \
+      python -m pip install --no-cache-dir --no-deps "$SAGE_WHEEL_URL" \
+      && python -c "from sageattention import sageattn; print('sageattention OK')"; \
+    fi
+
 RUN find /usr/local/lib/python3.13 -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/local/lib/python3.13 -type d \( -name 'docs' -o -name 'doc' \) ! -path '*/botocore/*' -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/local/lib/python3.13 -name '*.a' -delete 2>/dev/null || true \
-    && find /usr/local/lib/python3.13 -name '*.so' ! -path '*/onnxruntime/*' -exec strip --strip-unneeded {} \; 2>/dev/null || true \
+    && find /usr/local/lib/python3.13 -name '*.so' ! -path '*/onnxruntime/*' ! -path '*/sageattention/*' -exec strip --strip-unneeded {} \; 2>/dev/null || true \
     && rm -rf /usr/local/lib/python3.13/site-packages/torch/share 2>/dev/null || true \
     && find /usr/local/lib/python3.13 -type d -name tests -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/local/lib/python3.13 -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true \
