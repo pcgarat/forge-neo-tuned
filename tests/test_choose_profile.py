@@ -47,6 +47,11 @@ class RecommendTests(unittest.TestCase):
         rec = c.recommend(c.Answers(model="klein", resolution=1024))
         self.assertEqual(rec.attn, "flash")
 
+    def test_krea2_forces_ck_at_any_resolution(self):
+        for res in (768, 1024, 1280):
+            rec = c.recommend(c.Answers(model="krea2", resolution=res))
+            self.assertEqual(rec.attn, "ck", f"krea2 a {res} px debería usar ck")
+
     def test_high_res_image_uses_ck(self):
         rec = c.recommend(c.Answers(model="klein", resolution=1280))
         self.assertEqual(rec.attn, "ck")

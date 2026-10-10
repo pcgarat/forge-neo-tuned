@@ -18,8 +18,8 @@ de documentación upstream.
 | **NO instalado** | `sageattention`, `nunchaku`, `bitsandbytes` |
 
 Conclusión de partida: **la atención activa hoy es FlashAttention** (porque `flash_attn` está
-instalado), con xformers como fallback. `--use-ck-attention` solo se usa en el preset `make wan`
-(o con `make run ATTN=ck`).
+instalado), con xformers como fallback. `--use-ck-attention` lo activan los presets `make krea2` y
+`make wan` (o con `make run ATTN=ck`).
 
 ## Cómo elige Forge el backend
 

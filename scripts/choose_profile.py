@@ -75,10 +75,13 @@ def recommend(a: Answers) -> Recommendation:
     is_video = a.kind == "video" or a.model == "wan"
     if is_video:
         attn, reason = "ck", "vídeo: ~32k tokens, la atención domina"
+    elif a.model == "krea2":
+        refs = " y referencias (Moodboard/Edit)" if a.long_sequence else ""
+        attn, reason = "ck", f"Krea 2: TE visión Qwen3-VL{refs}; CK rinde (25,6→18,6 s a 1280 px)"
     elif a.long_sequence:
         attn, reason = "ck", "secuencias largas (Moodboard/Identity Edit): más contexto"
     elif a.resolution >= HIGH_RES_PX:
-        attn, reason = "ck", f"imagen a {a.resolution} px: CK INT8 rinde (26,3→21,9 s medidos)"
+        attn, reason = "ck", f"imagen a {a.resolution} px: CK INT8 rinde (25,6→18,6 s medidos)"
     else:
         attn, reason = "flash", "secuencias cortas: CK/Sage no aportan y el offload domina"
 

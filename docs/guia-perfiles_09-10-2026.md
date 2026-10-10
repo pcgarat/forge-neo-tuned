@@ -1,4 +1,4 @@
-# Última modificación: 2026-10-09
+# Última modificación: 2026-10-10
 
 # Guía de perfiles y órdenes: qué usar para Klein 9B, Krea 2 y Wan 2.2
 
@@ -17,8 +17,8 @@ Los presets aplican el mecanismo **recomendado para ese modelo**; si tu caso es 
 con una variable sin cambiar de orden.
 
 ```bash
-make krea2                 # VRAM auto + atención recomendada de Krea 2 (flash)
-make krea2 ATTN=ck         # Krea 2 a 1280 px, backend INT8
+make krea2                 # VRAM auto + atención recomendada de Krea 2 (ck, INT8)
+make krea2 ATTN=flash      # vuelve a FlashAttention (bit-exacto)
 make wan                   # Wan 2.2, atención ck (INT8) por defecto
 make run VRAM=8gb ATTN=sage # caso a la carta (sage exige `make build-sage`)
 ```
@@ -48,7 +48,7 @@ $ make up-interactive
 Configuración recomendada
   Modelo:   Krea 2 turbo (imagen)
   Tamaño:   lado mayor 1280 px
-  Atención: ck — imagen a 1280 px: CK INT8 rinde (26,3→21,9 s medidos)
+  Atención: ck — imagen a 1280 px: CK INT8 rinde (25,6→18,6 s medidos)
   VRAM:     auto (nvidia-smi decide el perfil)
   Warmup:   no
 Notas:
@@ -76,7 +76,7 @@ Para automatizar (sin preguntas): `make up-interactive MODEL=krea2 RES=1280 API=
 | Modelo | Orden | Atención por defecto | Cuándo y por qué |
 |---|---|---|---|
 | **Flux.2 Klein 9B turbo** | `make klein` | `flash` | **Imagen, secuencias cortas** (2–6k tokens). CK/Sage no aportan hasta ≥1280 px. Turbo 4–8 pasos: CFG 1; no usar Spectrum. ImageStitch da multi-imagen. |
-| **Krea 2 turbo** | `make krea2` | `flash` (→ `ATTN=ck` a ≥1280 px) | **Imagen + TE visión Qwen3-VL** (Moodboard / Identity Edit) + Depth/Pose LoRA. Sin `--fast-fp8`. Medido: CK INT8 a 1280 px baja 26,3 s → 21,9 s; a 768 px no cambia. |
+| **Krea 2 turbo** | `make krea2` | `ck` (INT8) | **Imagen + TE visión Qwen3-VL** (Moodboard / Identity Edit) + Depth/Pose LoRA. Sin `--fast-fp8`. Medido: CK INT8 a 1280 px baja 25,6 s → 18,6 s (−27 %); a 1024 px, −11 %. Hasta ahora venía en `flash`; pasa a `ck` por defecto (`ATTN=flash` para volver al bit-exacto). |
 | **Wan 2.2 turbo** | `make wan` | `ck` (INT8) | **Vídeo / I2V**; ~32k tokens, la atención domina. Alternativa: Sparse Attention desde la UI — **sustituye** el backend, no se suma. Para lotes largos a resolución fija, Torch Compile. |
 | **API / lotes** | `make chatbot` | `flash` | Warmup `torch.compile` (`guard_filter_fn`, compatible con `--cuda-malloc`) al tamaño del último gen. |
 
@@ -111,12 +111,13 @@ kernel de atención alternativo, así que se queda en `flash`. Si el checkpoint 
 según tu VRAM, `VRAM=auto` lo detecta; en 8 GB el `fp8_e4m3fn-unet` del perfil 8 GB es lo que lo mete.
 
 **Krea 2.** Añade el text encoder de visión de Qwen3-VL, que en 8 GB es **muy justo** (ver
-`docs/integracion-krea2-moodboard-identity-edit-forge-neo_23-07-2026.md`). El preset usa `flash` porque
-a las resoluciones donde Krea 2 se usa habitualmente la atención no es el cuello. **Sube a `ATTN=ck`
-cuando trabajes a ≥1280 px o con Moodboard/Identity Edit** (más tokens de contexto): ahí sí se mide la
-mejora. No uses `--fast-fp8` (falla en Krea 2).
+`docs/integracion-krea2-moodboard-identity-edit-forge-neo_23-07-2026.md`). El preset usa `ck` (INT8)
+porque CK gana en todo el rango medido (1024 y 1280 px), donde el coste de atención ya pesa. **Baja a
+`ATTN=flash`** si necesitas bit-exactitud (CK cuantiza Q/K: a igual semilla la imagen cambia) o si
+detectas artefactos. Con Moodboard/Identity Edit (más tokens de contexto), `ck` sigue siendo la
+elección. No uses `--fast-fp8` (falla en Krea 2).
 
-**Wan 2.2.** Es el único donde la atención domina de verdad: ~32.000 tokens por clip. Por eso el preset
+**Wan 2.2.** Es el único donde la atención domina de verdad: ~32.000 tokens por clip. Por eso su preset
 activa `ck` (INT8) sin pedirlo. Dos interacciones a recordar: (1) **Sparse Attention de la UI compite**
 con `ck`/`sage` (instala un override que sustituye el backend); elige una. (2) Para muchos clips a
 resolución fija, **Torch Compile** amortiza la compilación; en uso interactivo cambiando de resolución,

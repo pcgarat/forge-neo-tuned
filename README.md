@@ -109,7 +109,7 @@ Guía: [docs/integracion-krea2-moodboard-identity-edit-forge-neo_23-07-2026.md](
 | Comando | Uso |
 |---------|-----|
 | `make klein` | Flux.2 Klein 9B turbo: VRAM auto + atención `flash` |
-| `make krea2` | Krea 2 turbo: VRAM auto + `flash` (prueba `ATTN=ck` a ≥1280 px) |
+| `make krea2` | Krea 2 turbo: VRAM auto + `ck` (INT8; `ATTN=flash` para bit-exacto) |
 | `make wan` | Wan 2.2 turbo (vídeo): VRAM auto + `ck` (INT8) |
 | `make run ATTN= VRAM=` | Arranque manual con los ejes a la carta (`ATTN=flash|ck|sage|sage-triton`, `VRAM=auto|8gb|normal|high`, `STREAM=on|off`) |
 | `make up-interactive` | Asistente: pregunta modelo, tamaño, imagen/vídeo, API y solape de offload… y arranca con lo recomendado |

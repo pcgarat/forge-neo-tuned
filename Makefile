@@ -70,7 +70,7 @@ help:
 	@echo "  make klein   Flux.2 Klein 9B turbo — imagen; ImageStitch para multi-imagen."
 	@echo "               CFG 1, 4-8 pasos. Atención flash (secuencias cortas: CK/Sage no aportan)."
 	@echo "  make krea2   Krea 2 turbo — imagen + TE visión Qwen3-VL (Moodboard / Identity Edit)"
-	@echo "               y Depth/Pose ControlNet-LoRA. A >=1280 px prueba ATTN=ck."
+	@echo "               y Depth/Pose ControlNet-LoRA. Por defecto ATTN=ck (INT8)."
 	@echo "  make wan     Wan 2.2 turbo — vídeo / I2V; ~32k tokens, la atención domina."
 	@echo "               Por defecto ATTN=ck (INT8). No combinar con Sparse Attention (se sustituyen)."
 	@echo ""
@@ -166,7 +166,7 @@ _launch-model: workspace
 
 # Presets por modelo: fijan el ATTN recomendado y detectan VRAM. Override con ATTN=/VRAM=.
 klein: ATTN = flash
-krea2: ATTN = flash
+krea2: ATTN = ck
 wan:   ATTN = ck
 klein krea2 wan run: _launch-model
 
