@@ -12,8 +12,29 @@ from typing import Annotated
 import modules.script_callbacks as script_callbacks
 from modules import shared, scripts
 
+try:
+    from modules.shared_cmd_options import cmd_opts
+except ImportError:
+    cmd_opts = None
+
 sys.path.insert(0, os.path.dirname(__file__))
 from forge_neo_compat import FORGE_NEO_SELECTORS
+
+
+def get_ui_config_path() -> str:
+    """Ruta de ui-config.json según Forge.
+
+    El default de --ui-config-file apunta a data_path (--data-dir), no al dir de scripts.
+    Con --data-dir /data (esta imagen) el fichero vive en /data/ui-config.json, por lo que
+    scripts.basedir() (/app/webui) daría FileNotFoundError. Solo si el usuario lo sobreescribe
+    con una ruta relativa caemos al basedir de la extensión (comportamiento de A1111 vanilla).
+    """
+    ui_config = getattr(cmd_opts, "ui_config_file", None)
+    if not ui_config:
+        ui_config = getattr(getattr(shared, "cmd_opts", None), "ui_config_file", None)
+    if not ui_config:
+        return path.join(scripts.basedir(), "ui-config.json")
+    return ui_config if path.isabs(ui_config) else path.join(scripts.basedir(), ui_config)
 
 
 def is_forge_host() -> bool:
@@ -124,7 +145,7 @@ def state_manager_api(blocks: gr.Blocks, app: FastAPI):
             print(f"[StateManager] WARNING: Failed to collect Gradio component mapping: {e}")
 
         # Add ui-config fallback entries
-        ui_config_path = path.join(scripts.basedir(), "ui-config.json")
+        ui_config_path = get_ui_config_path()
         try:
             with open(ui_config_path, 'r', encoding='utf-8') as f:
                 ui_config_contents = json.load(f)
@@ -174,15 +195,23 @@ def state_manager_api(blocks: gr.Blocks, app: FastAPI):
 
     @app.get("/statemanager/uidefaults")
     async def get_ui_defaults():
-        filepath = path.join(scripts.basedir(), "ui-config.json")
-        
-        with open(filepath, 'r', encoding='utf-8') as f:
-            contents = json.load(f)
-            
-            return {
-                "hash": sha256sum(filepath),
-                "contents": {k: v for (k, v) in contents.items() if k.endswith("/value")} # We don't need /visible, /min, /max, etc.
-            }
+        filepath = get_ui_config_path()
+
+        # Si Forge aún no ha volcado el fichero (primer arranque) devolvemos un mapa vacío
+        # en lugar de propagar un 500, para que el cliente siga operativo.
+        if not path.isfile(filepath):
+            return {"hash": "missing", "contents": {}}
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                contents = json.load(f)
+        except (ValueError, json.JSONDecodeError):
+            return {"hash": "invalid", "contents": {}}
+
+        return {
+            "hash": sha256sum(filepath),
+            "contents": {k: v for (k, v) in contents.items() if k.endswith("/value")} # We don't need /visible, /min, /max, etc.
+        }
         
     @app.get("/statemanager/savelocation")
     async def get_save_location():
