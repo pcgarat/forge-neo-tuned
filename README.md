@@ -114,6 +114,7 @@ Guía: [docs/integracion-krea2-moodboard-identity-edit-forge-neo_23-07-2026.md](
 | `make run ATTN= VRAM=` | Arranque manual con los ejes a la carta (`ATTN=flash|ck|sage|sage-triton`, `VRAM=auto|8gb|normal|high`, `STREAM=on|off`) |
 | `make up-interactive` | Asistente: pregunta modelo, tamaño, imagen/vídeo, API y solape de offload… y arranca con lo recomendado |
 | `make up` | Arranca con el `EXTRA_ARGS` del `.env`, sin ejes |
+| `make restart` | Recrea el contenedor con la config exacta de la ejecución actual (imagen + `EXTRA_ARGS` + `COMMANDLINE_ARGS`); sin contenedor cae a `make up` |
 | `make preflight-gpu` | Valida driver NVIDIA y socket de `nvidia-persistenced` (evita fallos crípticos de runc) |
 | `make chatbot` | Perfil 8 GB + warmup `torch.compile` para API |
 | `make bench-attn` / `bench-attn-sweep` | Medir backends de atención (misma semilla) → informe md |
@@ -127,7 +128,8 @@ Guía: [docs/integracion-krea2-moodboard-identity-edit-forge-neo_23-07-2026.md](
 `make help` agrupa todas las órdenes con su cuándo; detalle en [`docs/guia-perfiles_09-10-2026.md`](docs/guia-perfiles_09-10-2026.md).
 
 `.env`: `DATA_PATH`, `EXTENSIONS_PATH`, `PUID`/`PGID`, `EXTRA_ARGS`, subdirs de modelos e IIB
-(`IIB_ACCESS_CONTROL`, `IIB_ACCESS_CONTROL_ALLOWED_PATHS`). Tras cambios: `make restart`.
+(`IIB_ACCESS_CONTROL`, `IIB_ACCESS_CONTROL_ALLOWED_PATHS`). Tras cambios: `make up` (`make restart`
+conserva la config del contenedor en marcha y no relee el `.env`).
 
 **ReActor:** [codeberg.org/Gourieff/sd-webui-reactor](https://codeberg.org/Gourieff/sd-webui-reactor) — no el fork `-sfw` (ORT 1.17.1).
 

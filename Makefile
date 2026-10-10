@@ -79,7 +79,7 @@ help:
 	@echo "  make up       Arranca con el EXTRA_ARGS del .env, sin ejes (RunPod / perfiles propios)."
 	@echo "  make up-interactive  Pregunta modelo, tamaño, imagen/vídeo… y arranca con lo recomendado."
 	@echo "  make down     Para y elimina el contenedor."
-	@echo "  make restart  down + up (por defecto con el perfil del .env)."
+	@echo "  make restart  Recrea el contenedor con la config exacta de la ejecución actual"
 	@echo "  make logs     Sigue los logs del servicio (Ctrl+C para salir)."
 	@echo "  make shell    Abre una shell dentro del contenedor."
 	@echo "  make ps       Estado del servicio."
@@ -219,7 +219,28 @@ up: workspace
 down:
 	$(COMPOSE) down
 
-restart: down up
+# Recrea el contenedor conservando la config de arranque EXACTA de la ejecución actual:
+# misma imagen, EXTRA_ARGS y COMMANDLINE_ARGS que el contenedor en marcha. Un `down` + `up`
+# perdía los ejes con que se arrancó (ATTN=, VRAM=, STREAM= o un preset) y revertía al .env.
+# Si no hay contenedor, cae a `make up` (arranque por .env). Para aplicar un EXTRA_ARGS nuevo
+# del .env usa `make up`; para reiniciar el proceso sin recrear, `docker compose restart`.
+restart:
+	@$(ENV_LOAD); \
+	if [ -n "$$(docker ps -aq -f name="^$(SERVICE)$$")" ]; then \
+	  img=$$(docker inspect -f '{{.Config.Image}}' $(SERVICE)); \
+	  envs=$$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' $(SERVICE) 2>/dev/null || true); \
+	  extra=$$(printf '%s\n' "$$envs" | sed -n 's/^EXTRA_ARGS=//p'); \
+	  cmd=$$(printf '%s\n' "$$envs" | sed -n 's/^COMMANDLINE_ARGS=//p'); \
+	  echo "Recreando $(SERVICE) con la config actual:"; \
+	  echo "  Imagen: $$img"; \
+	  echo "  Args:   $${extra:-<vacío>}"; \
+	  if [ -n "$$cmd" ]; then export COMMANDLINE_ARGS="$$cmd"; fi; \
+	  export FORGE_IMAGE="$$img" EXTRA_ARGS="$$extra"; \
+	  $(COMPOSE) up -d --force-recreate$(if $(BENCH_DETACH),, && $(MAKE) --no-print-directory logs); \
+	else \
+	  echo "No hay contenedor $(SERVICE); arrancando desde .env (make up)…"; \
+	  $(MAKE) --no-print-directory up; \
+	fi
 
 # Comprueba en el host lo que runc necesita para montar la GPU en el contenedor.
 # Evita fallos crípticos de `docker compose up` (p. ej. "open /run/nvidia-persistenced/socket:
