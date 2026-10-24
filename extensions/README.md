@@ -48,6 +48,12 @@ ln -sfn ../../extensions/photographic-styles-and-wildcards-for-Krea-2/photograph
 
 Los symlinks apuntan al repo clonado, así que un `git pull` en él actualiza estilos y wildcards.
 
+## Repo propio (no semilla)
+
+`sd-forge-uw-wildcards/` tiene `.no-seed` y su propio Git. `make seed-extensions` no la copia. Se instala desde la interfaz con la URL del repositorio.
+
+En la máquina de desarrollo, el repo se monta en el contenedor con `docker-compose.override.yml` (copia de `docker-compose.override.example.yml`). Con ese montaje activo, "Install from URL" falla: la carpeta destino ya existe.
+
 ## Reglas
 
 - Añade aquí solo extensiones custom (una carpeta por extensión).

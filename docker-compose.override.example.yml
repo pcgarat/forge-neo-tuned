@@ -1,0 +1,21 @@
+# Montajes de desarrollo: repos de extensiones montados sobre EXTENSIONS_PATH.
+# Solo en la máquina de desarrollo: cp docker-compose.override.example.yml docker-compose.override.yml
+# `docker compose` (y `make up`) lo cargan solos. Sin este fichero, las extensiones
+# se instalan desde la interfaz con la URL del repositorio.
+# create_host_path: false → si falta la carpeta, compose falla en vez de crearla vacía
+# (root:root) y tapar la extensión.
+
+services:
+  forge-neo:
+    volumes:
+      - type: bind
+        source: ${IMG2PROMPT_EXT_PATH:-../sd-forge-img2prompt}
+        target: /data/extensions/sd-forge-img2prompt
+        bind:
+          create_host_path: false
+      # sd-forge-uw-wildcards tiene .no-seed: el árbol de git no entra por seed-extensions.
+      - type: bind
+        source: ${UW_WILDCARDS_EXT_PATH:-./extensions/sd-forge-uw-wildcards}
+        target: /data/extensions/sd-forge-uw-wildcards
+        bind:
+          create_host_path: false
