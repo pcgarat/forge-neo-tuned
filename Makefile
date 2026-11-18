@@ -57,7 +57,7 @@ ATTN_FLAGS = $(strip $(if $(filter ck,$(ATTN)),--use-ck-attention,$(if $(filter 
 ATTN_IMAGE = $(if $(filter sage sage-triton,$(ATTN)),$(FORGE_IMAGE_SAGE),$(FORGE_IMAGE))
 
 .PHONY: help build build-no-cache build-cuda12 build-slim build-sage push push-cuda12 push-slim push-sage \
-        run up up-interactive down restart logs shell ps clean klein krea2 wan chatbot chatbot-warmup test-warmup test-choose-profile \
+        run up up-interactive down restart logs shell ps clean klein krea2 wan chatbot chatbot-warmup test-warmup test-rembg test-choose-profile \
         workspace seed-extensions preflight-gpu preflight-gpu-check \
         bench-attn bench-attn-sweep bench-attn-flash bench-attn-ck bench-attn-sage bench-attn-sage-triton test-bench \
         bench-offload bench-offload-sweep bench-offload-sweep-nostream bench-offload-sweep-stream test-bench-offload \
@@ -109,6 +109,7 @@ help:
 	@echo "  make chatbot         Perfil 8 GB + warmup torch.compile al size del último gen (API)"
 	@echo "  make chatbot-warmup  Solo warmup (Forge ya tiene que estar arriba)"
 	@echo "  make test-warmup     Tests del parser/payload de chatbot-warmup"
+	@echo "  make test-rembg      Tests del parche de rembg (CPU + caché de sesión)"
 	@echo "  make test-choose-profile  Tests del asistente 'make up-interactive'"
 	@echo ""
 	@echo "BENCHMARKS (anexan filas a docs/*.md; requieren GPU)"
@@ -292,6 +293,10 @@ chatbot-warmup:
 
 test-warmup:
 	python3 -m unittest tests.test_chatbot_warmup -v
+
+# Tests del parche de rembg (proveedor CPU + caché de sesión ONNX).
+test-rembg:
+	python3 -m unittest tests.test_rembg_cpu -v
 
 # --- Benchmark de backends de atención -------------------------------------
 # Mide N generaciones idénticas contra el Forge que ya está arriba y anexa una fila
