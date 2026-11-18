@@ -406,6 +406,11 @@ seed-extensions:
 	  [ -d "$$d" ] || continue; \
 	  name=$$(basename "$$d"); \
 	  dest="$$ext_root/$$name"; \
+	  if [ -f "$$d/.no-seed" ]; then \
+	    echo "  skip  $$name (repo propio, no semilla)"; \
+	    skipped=$$((skipped+1)); \
+	    continue; \
+	  fi; \
 	  if [ -e "$$dest" ]; then \
 	    echo "  skip  $$name (ya existe en $$dest)"; \
 	    skipped=$$((skipped+1)); \

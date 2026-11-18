@@ -1,6 +1,7 @@
 # Secretes y configuración local
 .env
 !.env.example
+docker-compose.override.yml
 
 # Python
 __pycache__/
@@ -36,3 +37,6 @@ extensions/**/iib_db_backup/
 extensions/**/*.log
 extensions/**/__pycache__/
 extensions/**/.env
+
+# Repo propio. Se instala desde GitHub, no forma parte de docker-neo.
+extensions/sd-forge-uw-wildcards/
