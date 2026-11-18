@@ -69,6 +69,11 @@ RUN python -m pip install --no-cache-dir --no-deps 'insightface==1.0.1' \
     && python -m pip uninstall -y onnxruntime \
     && python -m pip install --no-cache-dir --force-reinstall --no-deps 'onnxruntime-gpu==1.28.0'
 
+# RemBG (quitar fondo): pide `rembg==2.0.50 --no-deps` en su install.py, que no existe
+# para Py3.13 (Requires-Python <3.12). Se hornea 2.0.87 (compatible 3.13) con sus deps.
+# No declara onnxruntime, así que no pisa el onnxruntime-gpu de ReActor. Ver Dockerfile principal.
+RUN python -m pip install --no-cache-dir 'rembg==2.0.87'
+
 # Krea2 Depth/Pose ControlNet-LoRA: install.py no corre con --skip-install.
 RUN python -m pip install --no-cache-dir --no-deps 'easy-dwpose==1.0.2'
 

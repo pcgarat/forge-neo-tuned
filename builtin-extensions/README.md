@@ -15,6 +15,7 @@ sobrevivir a un volumen vacío (RunPod nuevo, `DATA_PATH` limpio) sin pasos manu
 | `sd-webui-agent-scheduler-neo` | Cola de generaciones |
 | `sd-webui-prompt-all-in-one-neo` | Historial, estilos y traducción de prompts |
 | `forge-neo-lama-cleaner` | Borrado/inpaint de objetos (LaMa) |
+| `forge-neo-rembg-cpu` | Parchea rembg (quitar fondo): CPU en vez de CUDA y sesión cacheada, para no competir por VRAM con `--lowvram` |
 
 **No** metas aquí pesos de modelo (YOLO, big-lama, ControlNet-LoRA…): van en `DATA_PATH/Models/…`.
 **No** dupliques la misma carpeta en `extensions/` ni en `EXTENSIONS_PATH` (Forge la cargaría dos veces).
