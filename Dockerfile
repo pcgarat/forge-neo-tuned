@@ -80,6 +80,16 @@ RUN python -m pip install --no-cache-dir --no-deps 'insightface==1.0.1' \
          python -m pip install --no-cache-dir --force-reinstall --no-deps 'onnxruntime-gpu==1.28.0'; \
        fi
 
+# RemBG (quitar fondo): su install.py pide `rembg==2.0.50 --no-deps`, pero esa versión
+# declara Requires-Python <3.12 y no existe para Py3.13. Se hornea la última que sí
+# soporta 3.13 con sus deps completas (jsonschema/pooch/pymatting/scikit-image); sin
+# ellas el `import rembg` de la extensión falla. rembg 2.0.87 ya no declara onnxruntime,
+# así que NO pisa el onnxruntime-gpu de ReActor, pero lo necesita en runtime para inferir
+# → con BUILD_SLIM=1 la extensión no funcionará (no hay ORT).
+# scikit-image sube de 0.25 a 0.26; insightface y albumentations lo toleran (verificado:
+# face_align.norm_crop y transforms siguen OK).
+RUN python -m pip install --no-cache-dir 'rembg==2.0.87'
+
 # Krea2 Depth/Pose ControlNet-LoRA: install.py no corre con --skip-install.
 # --no-deps evita que easy-dwpose pinche numpy/huggingface_hub antiguos.
 RUN python -m pip install --no-cache-dir --no-deps 'easy-dwpose==1.0.2'

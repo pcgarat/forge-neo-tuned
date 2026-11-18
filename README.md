@@ -47,6 +47,7 @@ Con `--skip-install`, cada extensión no puede instalar lo suyo; se hornea a pro
 | ReActor | `insightface==1.0.1` (wheel cp313), `albumentations`, **reafirma `onnxruntime-gpu`** (insightface pisa ORT CPU) |
 | Depth/Pose | `easy-dwpose` con `--no-deps` (no pincha numpy / huggingface_hub viejos) |
 | Dynamic prompts | `dynamicprompts` + `send2trash` **sin** extras MagicPrompt (evitarían `transformers[torch]` y pisarían torch) |
+| RemBG | `rembg==2.0.87` (su `install.py` pide 2.0.50, que no existe para Py3.13) + `jsonschema`/`pooch`/`pymatting`/`scikit-image`; no pisa `onnxruntime-gpu` |
 | Builtin Neo | ultralytics, sqlalchemy, etc.; boto3 y aliyun-python-sdk (traductores AWS/Aliyun de Prompt All-in-One) |
 | Stack base | xformers, Flash Attention, onnxruntime-gpu (salvo slim), FFmpeg |
 | Runtime | `gcc`/`g++` para Triton JIT (`torch.compile` / flash / sage) |
