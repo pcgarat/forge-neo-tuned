@@ -229,11 +229,7 @@ class Krea2Edit(scripts.Script):
 
     def postprocess(self, p: StableDiffusionProcessing, processed, *args):
         if self.armed_tensors is not None and hasattr(p.sd_model, "clear_edit"):
-            p.sd_model.clear_edit()
-            from backend.args import dynamic_args
-            dynamic_args["ref_latents"].clear()
-            dynamic_args["ref_boosts"] = []
-            dynamic_args["ref_fit"] = []
+            p.sd_model.clear_edit(release_refs=True)
 
     # ---- Auto face-ref prep -------------------------------------------------------------------
 
@@ -283,11 +279,7 @@ class Krea2Edit(scripts.Script):
             processed = process_images(p2)
         finally:
             if hasattr(p.sd_model, "clear_edit"):
-                p.sd_model.clear_edit()
-            from backend.args import dynamic_args
-            dynamic_args["ref_latents"].clear()
-            dynamic_args["ref_boosts"] = []
-            dynamic_args["ref_fit"] = []
+                p.sd_model.clear_edit(release_refs=True)
         if shared.state.interrupted or not processed.images:
             return None
         return processed.images[0]
