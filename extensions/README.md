@@ -9,7 +9,7 @@ Código de extensiones **no built-in** que `make up` / `make workspace` copian a
 | `sd-webui-infinite-image-browsing` | Infinite Image Browsing |
 | `stable-diffusion-webui-zoomimage` | Zoom de imagen |
 | `sd-forge-krea2-moodboard` | Krea2 Moodboard (UI) |
-| `sd-forge-krea2-edit` | Krea2 Identity Edit (UI; fix `dynamic_args` aplicado) |
+| `sd-forge-krea2-edit` | Krea2 Identity Edit (UI) |
 
 El patch de backend Krea2 va en la **imagen** (`patches/`), no aquí.
 

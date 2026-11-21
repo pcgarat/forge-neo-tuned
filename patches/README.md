@@ -2,10 +2,69 @@
 
 | Patch | Qué hace |
 |-------|----------|
-| `krea2-features-backend.patch` | Moodboard + Identity Edit (hooks K2 / Qwen3-VL). Regenerado para Neo `41359cd…` (ver "Segunda regeneración" abajo). |
+| `krea2-features-backend.patch` | Moodboard + Identity Edit + Re-render (hooks K2 / Qwen3-VL). Portado a Neo `5998fb3` (2.33); ver "Tercera regeneración" abajo. |
+| `krea2-features-backend-2.29.1.patch` | Versión anterior, válida solo para Neo `41359cd…` (2.29.1). Se conserva como referencia. |
 | `krea2-features-backend.original.patch` | Original del toolkit (solo referencia; no aplicar en neo actual). |
-| `qwen35-vision-attention-fix.patch` | Fix (2 partes): (1) `attention_function(...)` mal llamado en visión Qwen3-VL → `TypeError: attention_flash() missing k,v,heads` (upstream ya lo arregló por su cuenta en `41359cd`, ver abajo); (2) fallback a `attention_pytorch` cuando el encoder visual corre en CPU (lowvram offload) → `NotImplementedError: flash_attn::_flash_attn_forward ... 'CPU' backend`. |
+| `qwen35-vision-attention-fix.patch` | Fix (2 partes): (1) `attention_function(...)` mal llamado en visión Qwen3-VL → `TypeError: attention_flash() missing k,v,heads` (upstream lo arregló por su cuenta en `41359cd`); (2) fallback a `attention_pytorch` cuando el encoder visual corre en CPU (lowvram offload) → `NotImplementedError: flash_attn::_flash_attn_forward ... 'CPU' backend`. |
+| `qwen35-vision-attention-fix-2.29.1.patch` | Versión anterior del anterior, para Neo `41359cd…`. |
 | `cmd-flags-numeric-types.patch` | Fix `/sdapi/v1/cmd-flags` (HTTP 500 `ResponseValidationError`): `FlagsModel` tipa cada flag como `type(default)` y los numéricos con `default=None` (`--port`, `--reserve-vram`, `--cuda-stream`) quedan como `str | None`; se relajan a `Any` esos campos. Ver `docs/attention-backends_09-10-2026.md`. |
+
+---
+
+# Tercera regeneración (`41359cd` → `5998fb3`, 124 commits, 2.29.1 → 2.33)
+
+## Por qué
+
+El pin `41359cd` (2.29.1) es la última versión donde los parches propios aplicaban limpio. A partir de
+`2.29.2` la deriva es estructural y no de contexto:
+
+- `21886f41` **"Rewrite TextProcessingEngine"** borró `backend/text_processing/qwen3vl_engine.py` y lo
+  sustituyó por `krea2_engine.py` + `_comfy.py` (SDClipModel/ClipTokenWeightEncoder de ComfyUI). El parche
+  propio apuntaba a un fichero que ya no existe.
+- `precompute_freqs_cis`, DeepStack (`deepstack_embeds`/`visual_pos_masks`) y `build_image_inputs`
+  **pasaron a ser upstream**: Neo 2.29 ya trae la visión nativa de Qwen3-VL. La mayor parte del parche de
+  julio es hoy código de serie, así que el parche que queda es mucho más pequeño (sin `_unpack_context`,
+  sin el forward completo duplicado de `llama.py`).
+
+## Cómo
+
+El toolkit upstream ([RedNodeAI/forge-neo-krea2-toolkit](https://github.com/RedNodeAI/forge-neo-krea2-toolkit))
+ya publicó en octubre (v3.0/v3.1) sus parches **reescritos sobre la visión nativa de Neo**, lo que evita
+rehacer el port desde cero. El procedimiento:
+
+1. `git apply` del `krea2-features-backend.patch` del toolkit v3.1 sobre el tag `2.29.2` (última base donde
+   aplica limpio) y commit.
+2. `git cherry-pick` de ese commit sobre `5998fb3` (2.33) → merge de 3 vías real.
+3. Resolución manual de los conflictos de `backend/nn/llm/llama.py`:
+   - `interleaved_mrope` y DeepStack: idénticos a upstream → se queda la versión de Neo (solo se conserva
+     el comentario explicativo).
+   - `Llama2_.forward`: se unifican firmas (`past_key_values` + `deepstack_embeds` + `**kwargs`).
+   - `preprocess_embed`: la versión de Neo mueve el encoder visual a `text_encoder_device()`; se conserva
+     eso y se añade encima el soporte de **lista de imágenes empaquetadas en un solo span** del patch
+     (`packed`), que es lo que usa el Moodboard para que N referencias no se lean como una rejilla.
+   - `Qwen3VL.forward`: Neo ya lo tiene; solo se añade el gate `native_vision_inputs` y `last_embeds_info`.
+4. Regeneración de los parches propios con `git diff 5998fb3 HEAD -- <ficheros>`.
+
+## Diferencias respecto al parche de 2.29.1
+
+- Desaparece `qwen35-vision-attention-fix` de `llama.py`/`qwen3vl_engine.py`: esa lógica ya es upstream.
+- `qwen35-vision-attention-fix` queda solo con el **fallback CPU** de `qwen35.py` más el enrutado a SDPA
+  en `attention_flash` cuando hay máscara (evita el `ERROR` por bloque y por paso en Krea2 `ref_boost`).
+- **Corrección propia (bug del toolkit v3.1 en Neo ≥ 2.29):** `_encode_with_moodboard` restauraba
+  `native_vision_inputs = False` en el `finally`. Con Neo 2.29+ el valor por defecto es `True`, así que
+  tras el primer Moodboard todas las codificaciones posteriores perdían DeepStack y MRoPE. Ahora se
+  guarda el valor previo y se restaura ese.
+- **Segunda corrección propia:** `Dockerfile` ya no pasa `--onnxruntime-gpu`; ese flag se eliminó en
+  2.33 (`backend/args.py`). ORT-GPU se instala explícitamente más abajo (para ReActor).
+
+## SHA pinned
+
+- Forge Neo (`neo`) SHA verificado: `5998fb39ea347dfe3a72a8ec88a971e909ed8738` (tag `2.33`).
+- Verificado en un clone limpio: los 3 parches aplican con `git apply --check` y `py_compile` pasa sobre
+  los 6 ficheros resultantes. La verificación es **estática** (no hay GPU/torch aquí): el smoke test real
+  es `make build && make krea2` con Moodboard e Identity Edit.
+- Si `neo` avanza, **re-verificar** con `git apply --check --verbose` antes de dar por bueno el build; no
+  asumir compatibilidad indefinida.
 
 ---
 

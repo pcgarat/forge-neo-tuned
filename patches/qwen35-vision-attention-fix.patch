@@ -1,37 +1,38 @@
 diff --git a/backend/attention.py b/backend/attention.py
-index f349ee2c..59382311 100644
+index a9ec092c..436db3da 100644
 --- a/backend/attention.py
 +++ b/backend/attention.py
-@@ -380,18 +380,26 @@ def attention_flash(q, k, v, heads, mask=None, attn_precision=None, skip_reshape
+@@ -380,19 +380,26 @@ def attention_flash(q, k, v, heads, mask=None, attn_precision=None, skip_reshape
          if mask.ndim == 3:
              mask = mask.unsqueeze(1)
  
 -    try:
--        assert mask is None
+-        causal = kwargs.get("causal", False)
+-        assert mask is None or causal
 -        out = flash_attn_wrapper(
 -            q.transpose(1, 2),
 -            k.transpose(1, 2),
 -            v.transpose(1, 2),
 -            dropout_p=0.0,
--            causal=False,
+-            causal=causal,
 -        ).transpose(1, 2)
 -        _fallback = False
 -    except Exception as e:
 -        logger.error(f"Error running flash_attn: {e}")
 +    # flash_attn's CUDA kernel only supports unmasked (optionally causal) attention. Callers that
-+    # need an attn_mask/bias (Qwen-Image joint attention padding, Krea2 Identity Edit's ref_boost
-+    # logit bias) always land here with a real tensor, so the previous "assert mask is None" inside
-+    # the try/except turned an expected routing decision into an ERROR log on every block of every
-+    # step. Route straight to scaled_dot_product_attention when masked (no wasted flash call, no
-+    # log spam) and keep the try/except only for genuine flash execution failures (mask is None).
-+    if mask is None:
++    # need a real attn_mask/bias (Qwen-Image joint-attention padding, Krea2 ref_boost logit bias)
++    # always land here with a tensor, so the assert inside try/except turned an expected routing
++    # decision into an ERROR log on every block of every step. Route straight to SDPA when masked
++    # and keep the try/except only for genuine flash execution failures.
++    causal = kwargs.get("causal", False)
++    if mask is None or causal:
 +        try:
 +            out = flash_attn_wrapper(
 +                q.transpose(1, 2),
 +                k.transpose(1, 2),
 +                v.transpose(1, 2),
 +                dropout_p=0.0,
-+                causal=False,
++                causal=causal,
 +            ).transpose(1, 2)
 +            _fallback = False
 +        except Exception as e:
@@ -42,7 +43,7 @@ index f349ee2c..59382311 100644
  
      if _fallback:
 diff --git a/backend/nn/llm/qwen35.py b/backend/nn/llm/qwen35.py
-index 65689740..0bc8756e 100644
+index 807e2e0d..676fc413 100644
 --- a/backend/nn/llm/qwen35.py
 +++ b/backend/nn/llm/qwen35.py
 @@ -5,7 +5,7 @@ import torch
@@ -53,25 +54,17 @@ index 65689740..0bc8756e 100644
 +from backend.attention import attention_function, attention_pytorch
  from backend.nn.llm.llama import apply_rope
  
- QWEN3VL_VISION = dict(num_heads=16, patch_size=16, temporal_patch_size=2, in_channels=3, spatial_merge_size=2, num_position_embeddings=2304, hidden_size=1024, intermediate_size=4096, depth=24, deepstack_visual_indexes=[5, 11, 17])
-@@ -77,7 +77,11 @@ class Qwen35VisionAttention(nn.Module):
+ QWEN3VL_VISION_COMMON = dict(num_heads=16, patch_size=16, temporal_patch_size=2, in_channels=3, spatial_merge_size=2, num_position_embeddings=2304)
+@@ -84,7 +84,11 @@ class Qwen35VisionAttention(nn.Module):
              q = q.transpose(0, 1).unsqueeze(0)
              k = k.transpose(0, 1).unsqueeze(0)
              v = v.transpose(0, 1).unsqueeze(0)
 -            attn_outputs.append(attention_function(q, k, v, self.num_heads, skip_reshape=True))
 +            # attention_flash/sage/xformers kernels require CUDA tensors; under lowvram the
 +            # vision encoder can run on CPU (offloaded), so fall back to attention_pytorch
-+            # (backed by torch's own scaled_dot_product_attention, CPU/CUDA-safe) in that case.
++            # (torch's own scaled_dot_product_attention, CPU/CUDA-safe) in that case.
 +            optimized_attention = attention_function if q.device.type == "cuda" else attention_pytorch
 +            attn_outputs.append(optimized_attention(q, k, v, self.num_heads, skip_reshape=True))
  
          attn_output = torch.cat(attn_outputs, dim=1)
          attn_output = attn_output.reshape(seq_length, -1)
-@@ -227,7 +231,6 @@ class Qwen35VisionModel(nn.Module):
-         position_embeddings = (cos, sin[..., :sin_half], -sin[..., sin_half:])
-         cu_seqlens = torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0]).cumsum(dim=0, dtype=torch.int32)
-         cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
--
-         deepstack_features = []
-         for layer_num, blk in enumerate(self.blocks):
-             x = blk(x, cu_seqlens=cu_seqlens, position_embeddings=position_embeddings)

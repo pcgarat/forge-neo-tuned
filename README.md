@@ -10,11 +10,12 @@ Compose y RunPod son solo el empaquetado. Imagen: **`ghcr.io/pcgarat/forge-neo`*
 
 | Pieza | Qué |
 |-------|-----|
-| **Krea 2 Moodboard + Identity Edit** | Patch regenerado del [toolkit](https://github.com/RedNodeAI/forge-neo-krea2-toolkit) sobre Neo pinneado (`FORGE_NEO_REF`); convive con el edit nativo upstream de img2img |
+| **Krea 2 Moodboard + Identity Edit** | Patch portado del [toolkit](https://github.com/RedNodeAI/forge-neo-krea2-toolkit) v3.1 sobre Neo 2.33 (`FORGE_NEO_REF`), reconstruido encima de la visión nativa de upstream |
 | **Qwen3-VL visión / lowvram** | Fallback a `attention_pytorch` cuando el encoder visual corre en CPU (evita `flash_attn` en CPU + spam de ERROR) |
 | **Fixes del merge** | p. ej. `dynamic_args` sin `.pop()` (metaclase Neo); convivencia Moodboard/Edit vs `krea2_do_reference`; shape post-`_unpack_context` |
 | **Shim A1111** | `generation_parameters_copypaste` → `infotext_utils` (extensiones pre-1.9 / dynamic-prompts) |
 | **Sin `--nunchaku` en build** | Ese flag fuerza torch incompatible con wheels `flash_attn` cu130/cp313; se prioriza flash |
+| **Sin `--onnxruntime-gpu` en build** | Ese flag se eliminó en Neo 2.33; ORT-GPU se instala explícitamente para ReActor |
 
 Detalle de regeneraciones y riesgos: [`patches/README.md`](patches/README.md).
 
