@@ -169,7 +169,7 @@ Ordenado por impacto esperado. "Estado" = qué sabemos ya; "Decisión" = qué ha
 | P3 | `grounding_px` (calidad ↔ velocidad) | ~1 s con TE en GPU | Medido sin LoRA; repetir con LoRA |
 | P4 | Checkpoint: INT4 / INT8 / fp8 / W4A8 | W4A8: **−28 % (peor)** | **Medido y descartado** (P4) |
 | P5 | TE: fp8 / int8_convrot / bf16 / abliterated | velocidad igual; el oficial es **inestable** | **Medido** (P5): abliterado por estabilidad |
-| P6 | VAE: oficial vs RealVAE vs HD | seg | Pendiente (bajo impacto) |
+| P6 | VAE: oficial vs RealVAE vs HD | **0 % de tiempo; cambia el acabado** | **Medido** (P6) |
 | P7 | LoRA: r64 / full / V2 + placement | **V2 1,15× más rápido y más estable** | **Medido** (P7); placement pendiente || P8 | Distill 4-step (y 3-step) | **1,70×**; pierde 1–10 % de detalle | **Medido** (P8) |
 | P9 | `ref_boost` y el bias denso L×L | ~10 % (se diluye con LoRA) | Medido |
 | P9b | Bias de atención disperso | 20–50 % en alta resolución | Idea de implementación |
@@ -377,12 +377,55 @@ cuello de botella evitable: es un eje de calidad, no de rendimiento; se deja en 
 previa a P1, así que los absolutos están en la banda de 60–135 s; la comparación es válida por ser el
 mismo perfil en ambas ramas, pero conviene re-verificarla con `TE=gpu` si se quiere cerrar del todo.)
 
-### P6 — VAE
+### P6 — VAE: rendimiento y acabado (medido)
 
-`krea2RealVae_v10` (actual) vs `qwen_image_vae` vs `Krea2-HD-vae`. Consenso de la comunidad: las
-diferencias son sutiles y dependientes de semilla; HD gana contraste pero aplasta sombras, Real
-conserva detalle en sombra y piel. El VAE es 242 MB: **no es palanca de velocidad**, solo de
-acabado. Se puede cerrar como decisión estética.
+**Velocidad: idéntica.** Los tres VAEs de 485 MB (y el de 243 MB) van igual con la receta final:
+24,0 s / 24,5 s / 24,8 s a 640 px. La primera medición dio 33,7 s para `krea2RealVae`, pero era
+**efecto de orden** (primer kernel JIT tras cambiar de VAE): repetida en caliente, 24,0 s. Con 4
+pasos el VAE no es palanca de rendimiento.
+
+**Acabado: diferencias medibles** (832×832, misma semilla y prompt):
+
+| VAE | Detalle (HF) | Nitidez | Brillo | Sombras <25 | L1 vs Real |
+|---|---|---|---|---|---|
+| **krea2RealVae_v10** | **3086** | 6,33 | 68,8 | 30,3 % | — |
+| qwen_image_vae | 2570 | 6,28 | 70,3 | 29,3 % | 2,39 |
+| **Krea2-HD-vae** | 2854 | **6,68** | 64,3 | **36,5 %** | 6,28 |
+| Wan2.1_VAE | 2695 | 6,40 | 70,1 | 29,2 % | 2,35 |
+
+Se confirma el consenso de la comunidad, ahora con números:
+
+- **`krea2RealVae_v10` conserva más detalle fino** (3086, un 20 % más que `qwen_image_vae`) y
+  mantiene las sombras abiertas. Es el mejor punto de partida para edición de identidad, donde
+  piel y textura importan.
+- **`Krea2-HD-vae` da más nitidez percibida (6,68)** y más contraste, pero **aplasta sombras**: un
+  36,5 % de píxeles por debajo de 25 frente al 30,3 % del Real. Recuperar ese detalle en post es
+  posible pero ya se perdió.
+- **`qwen_image_vae` y `Wan2.1_VAE` son casi idénticos entre sí** (L1 2,39 vs 2,35 contra Real) y
+  los más planos. El Wan es el más pequeño (243 MB) y una alternativa razonable si el espacio
+  aprieta, sin ganancia visible.
+
+**Veredicto: es una decisión estética, no técnica.** Se mantiene `krea2RealVae_v10` como defecto
+y `Krea2-HD-vae` queda como opción para piezas donde se busque punch y no importen las sombras.
+
+#### Bug de imagen encontrado al medirlo (arreglado)
+
+La primera vez que se intentó cambiar de VAE, toda generación con VAE tiled fallaba con:
+
+```
+subprocess.CalledProcessError: ... gcc ... driver.c ...
+/usr/local/lib/python3.13/dist-packages/triton/backends/nvidia/driver.c:9:10:
+    fatal error: Python.h: No such file or directory
+```
+
+La etapa `runtime` del `Dockerfile` instalaba **`gcc` y `g++`** con el comentario "Triton (flash/sage
+JIT) necesita un C compiler en runtime", pero **no `python3.13-dev`**. Sin las cabeceras, Triton no
+puede compilar su shim `driver.c` y el primer kernel JIT revienta: el compilador estaba, pero era
+inútil. Afecta a cualquier ruta que compile en runtime (VAE tiled, Sage/Triton, compile).
+
+**Arreglado en `Dockerfile` y `Dockerfile.cuda12`** (etapa `runtime`, todos los perfiles incluido
+slim, que comparte Dockerfile). En el contenedor vivo se instaló a mano para poder terminar las
+mediciones; el fix real entra con el próximo `make build`.
 
 ### P7 — LoRA de edición: v1.2 vs V2 (medido)
 
@@ -704,7 +747,8 @@ pesos bf16/fp16. Mantenerlo oscurece qué está haciendo el perfil. Se puede ret
     `krea2`/`krea` y respetar la selección explícita. **Prioridad alta**: bloquea el arranque.
 11. **P5** — **Medido**: el TE oficial es más nítido pero inestable en exposición (±14 de brillo entre
     semillas vs ±0,3 del abliterado). Se mantiene el abliterado para edición.
-12. **P6** — VAE: decisión estética, no de rendimiento.
+12. **P6** — **Medido**: los VAE no cambian el tiempo (24,0 s todos). Real conserva más detalle,
+    HD aplasta sombras. Decisión estética; se queda Real.
 
 ---
 

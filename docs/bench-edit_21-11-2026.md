@@ -1,4 +1,4 @@
-# Última modificación: 2026-11-21
+# Última modificación: 2026-11-22
 
 # Benchmark de Krea 2 Identity Edit
 
@@ -32,3 +32,10 @@ tiempo baja ~3x. El benchmark lo verifica en el log y aborta si no se cargó.
 | recipe-final-640 | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 19.34, 19.36 | 19.35 | 5.22 | 0 |
 | TE-oficial-qwen3vl_4b | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 19.85, 19.94 | 19.90 | 5.47 | 0 |
 | receta-final-restaurada | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 20.01, 19.82 | 19.91 | 5.62 | 0 |
+| VAE-krea2RealVae_v10 | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 24.16, 24.09 | 24.13 | 5.44 | 0 |
+| VAE-qwen_image_vae | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 24.07, 24.07 | 24.07 | 5.44 | 0 |
+| VAE-krea2RealVae_v10 | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 33.59, 33.76 | 33.68 | 5.44 | 0 |
+| VAE-qwen_image_vae | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 24.51, 24.46 | 24.49 | 5.44 | 0 |
+| VAE-Krea2-HD-vae | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 24.61, 24.95 | 24.78 | 5.44 | 0 |
+| VAE-krea2Real-recheck | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 23.96, 23.91, 24.02 | 23.96 | 5.44 | 0 |
+| estado-final-verificado | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 24.24, 23.86, 23.81 | 23.86 | 5.47 | 0 |
