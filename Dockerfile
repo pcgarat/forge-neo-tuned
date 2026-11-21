@@ -164,6 +164,9 @@ ENV PYTHONUNBUFFERED=1
 
 # gcc: Triton (flash/sage JIT) necesita un C compiler en runtime; sin él:
 # RuntimeError: Failed to find C compiler. Please specify via CC ...
+# python3.13-dev: Triton compila un shim (driver.c) que incluye <Python.h>. Sin las
+# cabeceras, gcc falla con "Python.h: No such file or directory" en el primer kernel
+# JIT (p. ej. el VAE tiled en img2img/extras), aunque el compilador esté presente.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     ffmpeg \
@@ -175,6 +178,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
     python3.13 \
     python3.13-venv \
+    python3.13-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
