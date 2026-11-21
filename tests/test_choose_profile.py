@@ -68,6 +68,21 @@ class RecommendTests(unittest.TestCase):
         rec = c.recommend(c.Answers(model="krea2", resolution=1024))
         self.assertTrue(any("--fast-fp8" in n for n in rec.notes))
 
+    def test_krea2_with_refs_puts_te_on_gpu(self):
+        rec = c.recommend(c.Answers(model="krea2", long_sequence=True))
+        self.assertEqual(rec.te, "gpu")
+        self.assertIn("TE=gpu", rec.make_lines())
+
+    def test_krea2_text_only_leaves_te_auto(self):
+        rec = c.recommend(c.Answers(model="krea2", resolution=1024))
+        self.assertEqual(rec.te, "auto")
+        self.assertNotIn("TE=gpu", rec.make_lines())
+
+    def test_other_models_never_set_te(self):
+        for model in ("klein", "wan"):
+            rec = c.recommend(c.Answers(model=model, long_sequence=True))
+            self.assertEqual(rec.te, "auto", f"{model} no manda vision tokens al TE")
+
     def test_video_notes_sparse_incompatibility(self):
         rec = c.recommend(c.Answers(model="wan", kind="video"))
         self.assertTrue(any("Sparse Attention" in n for n in rec.notes))
@@ -102,6 +117,14 @@ class MakeLinesTests(unittest.TestCase):
     def test_stream_on_not_emitted(self):
         rec = c.Recommendation(attn="flash", attn_reason="", stream=True)
         self.assertNotIn("STREAM=off", rec.make_lines())
+
+    def test_te_gpu_emitted(self):
+        rec = c.Recommendation(attn="ck", attn_reason="", te="gpu")
+        self.assertIn("TE=gpu", rec.make_lines())
+
+    def test_te_auto_not_emitted(self):
+        rec = c.Recommendation(attn="ck", attn_reason="", te="auto")
+        self.assertFalse(any(line.startswith("TE=") for line in rec.make_lines()))
 
 
 class AskStreamTests(unittest.TestCase):

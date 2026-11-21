@@ -16,8 +16,16 @@ PORT     = 7860
 #   auto (def)  detecta por nvidia-smi: >=20 GB highvram, >=12 GB normalvram, resto 8 GB.
 #   8gb         fuerza el perfil 8 GB (lowvram + offload asíncrono).
 #   normal|high fuerza normalvram / highvram.
+# TE: dónde corre el text encoder (--text-enc-device).
+#   auto (def)  sin flag: Forge decide. Con --lowvram -> CPU (barato para texto, caro para visión).
+#   gpu         --text-enc-device cuda. Con referencias (Moodboard/Identity Edit) el prefill de la
+#               imagen deja de hacerse en CPU: medido 135 s -> 12 s en Identity Edit 640 px.
+#               Con texto solo cuesta ~1,8 s (compite con el UNet por VRAM): no lo fuerces si no
+#               hay referencias. El preset `make krea2` lo activa por defecto.
+#   cpu         fuerza CPU (equivalente a auto bajo --lowvram; útil para aislar el efecto).
 ATTN ?= flash
 VRAM ?= auto
+TE ?= auto
 # WARMUP=1 ejecuta chatbot-warmup (torch.compile) tras arrancar; lo usa `make up-interactive`.
 WARMUP ?=
 
@@ -55,6 +63,8 @@ FORGE_IMAGE_SAGE ?= forge-neo:sage
 ATTN_FLAGS = $(strip $(if $(filter ck,$(ATTN)),--use-ck-attention,$(if $(filter sage,$(ATTN)),--sage-function fp16_cuda,$(if $(filter sage-triton,$(ATTN)),--sage-function fp16_triton,))))
 # ATTN -> imagen. Sage/sage-triton requieren el wheel horneado (make build-sage).
 ATTN_IMAGE = $(if $(filter sage sage-triton,$(ATTN)),$(FORGE_IMAGE_SAGE),$(FORGE_IMAGE))
+# TE -> flag de runtime. auto no añade nada (comportamiento histórico).
+TE_FLAGS = $(strip $(if $(filter gpu,$(TE)),--text-enc-device cuda,$(if $(filter cpu,$(TE)),--text-enc-device cpu,)))
 
 .PHONY: help build build-no-cache build-cuda12 build-slim build-sage push push-cuda12 push-slim push-sage \
         run up up-interactive down restart logs shell ps clean klein krea2 wan chatbot chatbot-warmup test-warmup test-rembg test-choose-profile \
@@ -87,6 +97,7 @@ help:
 	@echo "  Ejes (para make run y presets):"
 	@echo "    ATTN=flash|ck|sage|sage-triton   sage* exige 'make build-sage' antes"
 	@echo "    VRAM=auto|8gb|normal|high        auto detecta por nvidia-smi"
+	@echo "    TE=auto|gpu|cpu                  dónde corre el text encoder (visión Krea 2)"
 	@echo "    STREAM=on|off                    --cuda-stream en el perfil 8 GB (medición)"
 	@echo ""
 	@echo "IMAGEN"
@@ -161,13 +172,18 @@ _launch-model: workspace
 	$(resolve_vram); \
 	echo "  Atención: $(ATTN) $(ATTN_FLAGS)"; \
 	echo "  Imagen:   $(ATTN_IMAGE)"; \
-	export EXTRA_ARGS="$$extra $(ATTN_FLAGS)" FORGE_IMAGE="$(ATTN_IMAGE)"; \
+	echo "  TE:       $(if $(TE_FLAGS),$(TE) ($(TE_FLAGS)),auto (Forge decide))"; \
+	export EXTRA_ARGS="$$extra $(ATTN_FLAGS) $(TE_FLAGS)" FORGE_IMAGE="$(ATTN_IMAGE)"; \
 	$(COMPOSE) up -d$(if $(BENCH_DETACH),, && $(MAKE) --no-print-directory logs)
 	@if [ -n "$(WARMUP)" ]; then $(MAKE) --no-print-directory chatbot-warmup; fi
 
-# Presets por modelo: fijan el ATTN recomendado y detectan VRAM. Override con ATTN=/VRAM=.
+# Presets por modelo: fijan el ATTN recomendado y detectan VRAM. Override con ATTN=/VRAM=/TE=.
+# Krea 2 activa TE=gpu porque es el único preset que manda imágenes al text encoder de visión
+# (Moodboard/Identity Edit): en CPU el prefill de la referencia domina el tiempo (135 s -> 12 s
+# medidos en Identity Edit 640 px). Con texto solo la diferencia es de ~1,8 s en contra.
 klein: ATTN = flash
 krea2: ATTN = ck
+krea2: TE = gpu
 wan:   ATTN = ck
 klein krea2 wan run: _launch-model
 
