@@ -30,3 +30,5 @@ tiempo baja ~3x. El benchmark lo verifica en el log y aborta si no se cargó.
 | final-normal-1024px | identity-edit | 1024x1024 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 43.64, 44.04 | 43.84 | 5.53 | 0 |
 | final-normal-1280px | identity-edit | 1280x1280 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 73.26, 73.16, 73.11 | 73.16 | 6.25 | 0 |
 | recipe-final-640 | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 19.34, 19.36 | 19.35 | 5.22 | 0 |
+| TE-oficial-qwen3vl_4b | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 19.85, 19.94 | 19.90 | 5.47 | 0 |
+| receta-final-restaurada | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 20.01, 19.82 | 19.91 | 5.62 | 0 |

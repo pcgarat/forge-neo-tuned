@@ -168,7 +168,7 @@ Ordenado por impacto esperado. "Estado" = qué sabemos ya; "Decisión" = qué ha
 | P2 | Perfil de VRAM (`lowvram` vs `normalvram`) | **0 % (indistinguible)** | **Medido**: 1280 px OK, 1536 px OOM |
 | P3 | `grounding_px` (calidad ↔ velocidad) | ~1 s con TE en GPU | Medido sin LoRA; repetir con LoRA |
 | P4 | Checkpoint: INT4 / INT8 / fp8 / W4A8 | W4A8: **−28 % (peor)** | **Medido y descartado** (P4) |
-| P5 | TE: fp8 / int8_convrot / bf16 / abliterated | seg–min en prefill | Pendiente (native vision OFF ya descartado) |
+| P5 | TE: fp8 / int8_convrot / bf16 / abliterated | velocidad igual; el oficial es **inestable** | **Medido** (P5): abliterado por estabilidad |
 | P6 | VAE: oficial vs RealVAE vs HD | seg | Pendiente (bajo impacto) |
 | P7 | LoRA: r64 / full / V2 + placement | **V2 1,15× más rápido y más estable** | **Medido** (P7); placement pendiente || P8 | Distill 4-step (y 3-step) | **1,70×**; pierde 1–10 % de detalle | **Medido** (P8) |
 | P9 | `ref_boost` y el bias denso L×L | ~10 % (se diluye con LoRA) | Medido |
@@ -304,7 +304,59 @@ sentido si el kernel nativo entrara en juego (otra GPU o una versión más nueva
 > **sí funciona** (el que devuelve HTTP 500 es el `POST /sdapi/v1/options`). Para fijar el modelo
 > en la UI sin reiniciar: `override_settings_restore_afterwards: false`.
 
-### P5 — Text encoder
+### P5 — Text encoder: oficial vs abliterado (medido)
+
+Comparación limpia: `qwen3vl_4b.safetensors` (oficial de Comfy-Org) y
+`Huihui-Qwen3-VL-4B-Instruct-abliterated-fp8_scaled` tienen **formato byte-idéntico** (mismos
+dtypes: 252 F8_E4M3 + 461 BF16 + 252 U8, ambos 4,88 GiB). Solo cambian los pesos, así que cualquier
+diferencia es del modelo, no de la cuantización.
+
+**Velocidad: idéntica.** 19,90 s (oficial) vs 19,35 s (abliterado) con la receta final a 640 px.
+La diferencia está dentro del ruido; el TE no es el cuello en un edit de 4 pasos con visión.
+
+**Calidad: difieren de forma sistemática.** Misma fuente, misma semilla:
+
+| Semilla | TE | Nitidez | Brillo medio | Detalle (HF) |
+|---|---|---|---|---|
+| 777 | oficial | 6,83 | 75,4 | 3084 |
+| 777 | abliterado | 6,34 | 69,1 | 3085 |
+| 4242 | oficial | **7,11** | **89,7** | — |
+| 4242 | abliterado | 5,96 | **68,5** | — |
+
+El oficial sale **más nítido y más claro** en ambas semillas; el abliterado, más suave y más oscuro.
+El detalle de alta frecuencia es idéntico (3084 vs 3085), así que no es un problema de información:
+es cómo el encoder interpreta la instrucción y la imagen.
+
+**El dato que decide: estabilidad.** El brillo del oficial se mueve **75,4 → 89,7** entre semillas
+(±14); el del abliterado se queda en **69,1 → 68,5** (±0,3). Para edición con identidad, donde el
+resultado se compara contra una referencia, **la exposición predecible importa más que un punto
+extra de nitidez**: con el oficial hay que corregir la exposición semilla a semilla.
+
+**Recomendación: mantener el abliterado** para Identity Edit. No por el filtrado (irrelevante aquí:
+la instrucción es descriptiva), sino porque produce resultados más consistentes. El oficial sería
+preferible si se busca el máximo microcontraste y se acepta ajustar exposición a mano.
+
+#### Qué opciones hay y qué se descartó
+
+Opciones oficiales: `bf16` (8,9 GB), `fp8_scaled` (5,2 GB), `int8_convrot` (4,9 GB). La comunidad
+reporta **poca diferencia de velocidad** entre cuantizaciones; cambia la comprensión del prompt. En
+8 GB, `bf16` queda descartado si el TE va a GPU.
+
+**Descartado como palanca de velocidad:** `krea2_moodboard_native_vision = false` (splice-only, sin
+DeepStack ni mrope de 3 ejes). Medido con el TE en CPU, misma semilla y ajustes: **66,8 s vs 60,9 s**
+a `grounding_px` 384, e indistinguible (136,4 vs 135,4 s) a 768. El path nativo de visión **no** es un
+cuello de botella evitable: es un eje de calidad, no de rendimiento; se deja en `true`. (Medición
+previa a P1, así que los absolutos están en la banda de 60–135 s; la comparación es válida por ser el
+mismo perfil en ambas ramas.)
+
+Detalle de configuración: los logs muestran un auto-attach (`qwen3-vl-4b-heretic_int8`,
+`qwen_image_vae`) que después se sobrescribe con lo del perfil. Conviene dejar explícito solo un
+origen de verdad — y con esta comparación, el elegido importa (ver P18).
+
+> Pendiente: `qwen3vl_4b_int8_convrot` (mismo formato INT8, 4,5 GiB). No se probó porque el tiempo
+> es idéntico y la comparación interesante era de pesos, no de cuantización. El riesgo real de
+> ese fichero es otro: el auto-attach de `sd-forge-krea2` lo puede elegir por orden alfabético
+> (ver P18).
 
 Opciones oficiales: `bf16` (8,9 GB), `fp8_scaled` (5,2 GB), `int8_convrot` (4,9 GB). La comunidad
 reporta **poca diferencia de velocidad** entre ellas; lo que cambia es comprensión del prompt.
@@ -650,7 +702,9 @@ pesos bf16/fp16. Mantenerlo oscurece qué está haciendo el perfil. Se puede ret
 9. **P11/P12** — Caché de pasos (incierto) y SPEED (cambia composición).
 10. **P18** — Auto-attach de `sd-forge-krea2`: parchear `_find_krea2_modules()` para aceptar VAE
     `krea2`/`krea` y respetar la selección explícita. **Prioridad alta**: bloquea el arranque.
-11. **P5/P6** — TE oficial vs abliterado, VAE.
+11. **P5** — **Medido**: el TE oficial es más nítido pero inestable en exposición (±14 de brillo entre
+    semillas vs ±0,3 del abliterado). Se mantiene el abliterado para edición.
+12. **P6** — VAE: decisión estética, no de rendimiento.
 
 ---
 
