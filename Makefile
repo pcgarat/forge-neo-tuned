@@ -70,6 +70,7 @@ TE_FLAGS = $(strip $(if $(filter gpu,$(TE)),--text-enc-device cuda,$(if $(filter
         run up up-interactive down restart logs shell ps clean klein krea2 wan chatbot chatbot-warmup test-warmup test-rembg test-choose-profile \
         workspace seed-extensions preflight-gpu preflight-gpu-check \
         bench-attn bench-attn-sweep bench-attn-flash bench-attn-ck bench-attn-sage bench-attn-sage-triton test-bench \
+        bench-edit bench-edit-sweep test-bench-edit \
         bench-offload bench-offload-sweep bench-offload-sweep-nostream bench-offload-sweep-stream test-bench-offload \
         iib-access krea2-ext krea2-depth-ext reactor-fix install-docker _launch-model
 
@@ -132,6 +133,9 @@ help:
 	@echo "  make bench-offload      Mide it/s vs resolución y MB descargados del perfil activo"
 	@echo "  make bench-offload-sweep  Compara --cuda-stream on/off (reinicia y mide)"
 	@echo "  make test-bench-offload Tests del benchmark de offload"
+	@echo "  make bench-edit         Mide Krea 2 Identity Edit (LoRA verificado en el log)"
+	@echo "  make bench-edit-sweep   Compara TE en CPU vs GPU en el mismo perfil"
+	@echo "  make test-bench-edit    Tests del benchmark de Identity Edit"
 	@echo ""
 	@echo "PUBLICAR Y RUNPOD"
 	@echo "  make push | push-cuda12 | push-slim | push-sage   Construyen, etiquetan y suben"
@@ -351,6 +355,49 @@ bench-offload:
 
 test-bench-offload:
 	python3 -m unittest tests.test_bench_offload -v
+
+# --- Benchmark de Krea 2 Identity Edit -------------------------------------
+# Mide el edit con el LoRA activo (el benchmark lo verifica en el log y aborta si falta).
+# Requiere una imagen fuente: BENCH_EDIT_SOURCE=... o `make bench-edit` avisa y sale.
+# No reinicia nada; para comparar perfiles usa `make bench-edit-sweep`.
+BENCH_EDIT_ARGS      ?= --width 640 --height 640 --steps 8 --grounding-px 768 --ref-boost 4 --runs 2
+BENCH_EDIT_SOURCE    ?=
+BENCH_EDIT_REPORT    ?= docs/bench-edit_21-11-2026.md
+BENCH_EDIT_LORA      ?= krea2_identity_edit_v1_2_r64
+
+bench-edit:
+	@$(ENV_LOAD); \
+	data="$${DATA_PATH:-/workspace/forge-data}"; \
+	src="$(BENCH_EDIT_SOURCE)"; \
+	if [ -z "$$src" ]; then \
+	  src=$$(ls -t "$$data"/output/txt2img-images/*/*.png "$$data"/output/txt2img-images/*/*.jpeg 2>/dev/null | head -1); \
+	fi; \
+	if [ -z "$$src" ] || [ ! -f "$$src" ]; then \
+	  echo "Falta la imagen fuente: pasa BENCH_EDIT_SOURCE=<ruta> (o genera algo antes)." >&2; \
+	  exit 2; \
+	fi; \
+	echo "  Fuente: $$src"; \
+	python3 "$(CURDIR)/scripts/bench_edit.py" \
+	  --base-url "http://127.0.0.1:$(PORT)" \
+	  --container "$(SERVICE)" \
+	  --source "$$src" \
+	  --label "$${BENCH_EDIT_LABEL:-active}" \
+	  --lora "$(BENCH_EDIT_LORA)" \
+	  --out "$(CURDIR)/$(BENCH_EDIT_REPORT)" \
+	  $(BENCH_EDIT_ARGS)
+
+# Compara TE en CPU (implícito por --lowvram) vs TE en GPU sobre el mismo perfil.
+# Es la variable que domina el tiempo del edit con visión; reinicia entre ramas.
+bench-edit-sweep:
+	@$(MAKE) --no-print-directory run VRAM=8gb ATTN=ck TE=cpu BENCH_DETACH=1
+	@sleep $(BENCH_SLEEP)
+	@$(MAKE) --no-print-directory bench-edit BENCH_EDIT_LABEL=te-cpu
+	@$(MAKE) --no-print-directory run VRAM=8gb ATTN=ck TE=gpu BENCH_DETACH=1
+	@sleep $(BENCH_SLEEP)
+	@$(MAKE) --no-print-directory bench-edit BENCH_EDIT_LABEL=te-gpu
+
+test-bench-edit:
+	python3 -m unittest tests.test_bench_edit -v
 
 # Compara base (flash) vs CK INT8. Requiere GPU operativa (nvidia-smi). Intervalo configurable.
 BENCH_SLEEP ?= 30
