@@ -50,7 +50,7 @@ edición (y sale ~3× más rápido).
 |---|---|
 | GPU | RTX 4060, 8 GB, sm89 (Ada) |
 | CPU / RAM | 16 hilos, 32 GB |
-| Forge Neo | pin `41359cd` (`FORGE_NEO_REF`), Neo 2.29.x |
+| Forge Neo | pin `5998fb3` (`FORGE_NEO_REF`), Neo 2.33. Las cifras de §2–§4 se midieron con el pin anterior (`41359cd`, 2.29.1) |
 | torch | 2.13.0+cu130 |
 | Atención | Comfy-Kitchen INT8 activo (`--use-ck-attention`), xformers para VAE |
 | Checkpoint | `krea2_krea2Int4Convrot_v10Turbo` (6,4 GB) |
