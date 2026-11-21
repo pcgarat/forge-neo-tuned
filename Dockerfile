@@ -26,7 +26,8 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.13 1
 RUN python3.13 -m ensurepip --upgrade
 
 # Pin de Forge Neo compatible con patches/krea2-features-backend.patch (ver patches/README.md).
-ARG FORGE_NEO_REF=41359cd4b8b89212b3dbad8c9af719160a12ed63
+# 2.33 = último tag de la rama neo. Los parches de este repo están regenerados contra él.
+ARG FORGE_NEO_REF=5998fb39ea347dfe3a72a8ec88a971e909ed8738
 
 # SageAttention es un backend de atención opcional (ver docs/attention-backends_09-10-2026.md).
 # INSTALL_SAGE=1 hornea el wheel en la imagen; por defecto 0 (imagen idéntica a la actual).
@@ -48,11 +49,13 @@ WORKDIR /app/webui
 # BUILD_SLIM=1: sin onnxruntime-gpu (reduce mucho tamaño para RunPod)
 # Sin --nunchaku a propósito: ese flag fuerza torch 2.11, y los wheels precompilados de
 # flash_attn para cu130/cp313 solo existen contra torch 2.13 → --flash fallaba en silencio.
+# Sin --onnxruntime-gpu: ese flag desapareció en Neo 2.33; ORT-GPU se instala explícitamente
+# más abajo (ReActor lo necesita reafirmado porque insightface lo pisa).
 ARG BUILD_SLIM=0
 RUN if [ "$BUILD_SLIM" = "1" ]; then \
       export COMMANDLINE_ARGS="--exit --skip-torch-cuda-test --xformers --flash"; \
     else \
-      export COMMANDLINE_ARGS="--exit --skip-torch-cuda-test --xformers --flash --onnxruntime-gpu"; \
+      export COMMANDLINE_ARGS="--exit --skip-torch-cuda-test --xformers --flash"; \
     fi && python launch.py
 
 RUN python -m pip install --no-cache-dir python-dotenv pillow-avif-plugin imageio_ffmpeg hnswlib

@@ -57,6 +57,7 @@ ATTN_FLAGS = $(strip $(if $(filter ck,$(ATTN)),--use-ck-attention,$(if $(filter 
 ATTN_IMAGE = $(if $(filter sage sage-triton,$(ATTN)),$(FORGE_IMAGE_SAGE),$(FORGE_IMAGE))
 
 .PHONY: help build build-no-cache build-cuda12 build-slim build-sage push push-cuda12 push-slim push-sage \
+        forge-info forge-check \
         run up up-interactive down restart logs shell ps clean klein krea2 wan chatbot chatbot-warmup test-warmup test-rembg test-choose-profile \
         workspace seed-extensions preflight-gpu preflight-gpu-check \
         bench-attn bench-attn-sweep bench-attn-flash bench-attn-ck bench-attn-sage bench-attn-sage-triton test-bench \
@@ -95,6 +96,8 @@ help:
 	@echo "  make build-sage      Imagen + SageAttention horneado (tag :sage) para ATTN=sage*"
 	@echo "  make build-cuda12    Variante CUDA 12.4 (RunPod con driver < CUDA 13)"
 	@echo "  make build-slim      Variante slim (sin onnxruntime-gpu/nunchaku; menos tamaño)"
+	@echo "  make forge-info      Último tag de Forge Neo upstream vs el pin del Dockerfile"
+	@echo "  make forge-check     Verifica que los parches aplican sobre el pin (antes de subirlo)"
 	@echo ""
 	@echo "DATOS Y EXTENSIONES"
 	@echo "  make workspace       Crea el árbol de datos y siembra extensions/ si faltan (antes del 1er up)"
@@ -211,6 +214,35 @@ build-slim:
 # No pisa :latest; arranca con `make run ATTN=sage` o un preset con ATTN=sage.
 build-sage:
 	DOCKER_BUILDKIT=1 docker build --build-arg INSTALL_SAGE=1 -t $(FORGE_IMAGE_SAGE) .
+
+# --- Forge Neo upstream -----------------------------------------------------
+# Imprime el último tag de la rama neo y el pin del Dockerfile.
+forge-info:
+	@printf 'Pin en Dockerfile: '; sed -n 's/^ARG FORGE_NEO_REF=//p' Dockerfile
+	@printf 'Último tag neo:   '; git ls-remote --tags --refs https://github.com/Haoming02/sd-webui-forge-classic \
+	  | sed 's#.*refs/tags/##' | grep -E '^[0-9]+(\.[0-9]+)*$$' | sort -V | tail -1
+
+# Comprueba que los parches del repo aplican sobre un ref de Forge Neo (por defecto, el pin
+# del Dockerfile): clona efímero, aplica con --check y compila los ficheros resultantes.
+# Úsalo ANTES de cambiar FORGE_NEO_REF; sin esto, `make build` falla a mitad de la imagen.
+#   make forge-check                       # el pin actual
+#   make forge-check FORGE_NEO_REF=2.33    # un tag o SHA concreto
+forge-check:
+	@ref="$(or $(FORGE_NEO_REF),$$(sed -n 's/^ARG FORGE_NEO_REF=//p' Dockerfile))"; \
+	echo "Comprobando parches contra $$ref…"; \
+	tmp=$$(mktemp -d); \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	git clone -q --filter=blob:none --no-checkout https://github.com/Haoming02/sd-webui-forge-classic "$$tmp/neo" || exit 1; \
+	cd "$$tmp/neo" && git fetch -q --depth 1 origin "$$ref" && git checkout -q FETCH_HEAD || exit 1; \
+	for p in krea2-features-backend qwen35-vision-attention-fix cmd-flags-numeric-types; do \
+	  printf '  %-32s ' "$$p"; \
+	  if git apply --check "$(CURDIR)/patches/$$p.patch" 2>/dev/null; then echo OK; else echo FALLA; fail=1; fi; \
+	done; \
+	if [ -z "$$fail" ]; then \
+	  git apply "$(CURDIR)/patches/krea2-features-backend.patch" "$(CURDIR)/patches/qwen35-vision-attention-fix.patch" "$(CURDIR)/patches/cmd-flags-numeric-types.patch"; \
+	  for f in backend/diffusion_engine/krea.py backend/nn/krea.py backend/nn/llm/llama.py backend/text_processing/krea2_engine.py backend/attention.py backend/nn/llm/qwen35.py; do python3 -m py_compile "$$f" || exit 1; done; \
+	  echo "  py_compile OK"; \
+	else echo "  Algun parche no aplica: regenera antes de subir FORGE_NEO_REF (ver patches/README.md)"; exit 1; fi
 
 # Arranque con EXTRA_ARGS del .env, sin ejes (RunPod / perfiles propios).
 up: workspace
@@ -462,7 +494,9 @@ iib-access:
 # El backend patch ya va en la imagen (Dockerfile). Modelos/LoRA/TE van en DATA_PATH (manual).
 # Docs: docs/integracion-krea2-moodboard-identity-edit-forge-neo_23-07-2026.md
 # Nota: git fetch por SHA corto falla en GitHub; usar SHA completo o rama (main).
-KREA2_TOOLKIT_REF ?= 8aac7a745202ae2eecdf4435b1a85fb5466ee51c
+# Toolkit del que salen los parches y las extensiones UI. Pinneado a la v3.1 (parches reescritos
+# sobre la visión nativa de Neo 2.29+; la base de nuestro port a 2.33, ver patches/README.md).
+KREA2_TOOLKIT_REF ?= 3762db2
 krea2-ext:
 	@$(ENV_LOAD); \
 	ext_root="$${EXTENSIONS_PATH:-/workspace/forge-data/extensions}"; \
@@ -476,10 +510,9 @@ krea2-ext:
 	  && rm -rf "$$ext_root/sd-forge-krea2-moodboard" "$$ext_root/sd-forge-krea2-edit" \
 	  && cp -a "$$tmp/toolkit/extensions/sd-forge-krea2-moodboard" "$$ext_root/" \
 	  && cp -a "$$tmp/toolkit/extensions/sd-forge-krea2-edit" "$$ext_root/" \
-	  && python3 -c "from pathlib import Path; p=Path('$$ext_root')/'sd-forge-krea2-edit/scripts/krea2_edit.py'; s=p.read_text(); s2=s.replace('dynamic_args.pop(\"ref_boosts\", None)','dynamic_args[\"ref_boosts\"] = []').replace('dynamic_args.pop(\"ref_fit\", None)','dynamic_args[\"ref_fit\"] = []'); assert s2!=s, 'no se encontró dynamic_args.pop en krea2_edit.py'; p.write_text(s2)" \
 	  && echo "Instaladas en $$ext_root:" \
 	  && echo "  - sd-forge-krea2-moodboard" \
-	  && echo "  - sd-forge-krea2-edit (fix dynamic_args.pop aplicado)" \
+	  && echo "  - sd-forge-krea2-edit" \
 	  && echo "Reinicia la WebUI: make run krea2 (o make restart). Requiere imagen con el backend patch (make build)."
 
 # Actualiza el vendor de Krea2 Depth/Pose ControlNet-LoRA (extensions-builtin de la imagen).
