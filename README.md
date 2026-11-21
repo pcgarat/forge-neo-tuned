@@ -48,6 +48,7 @@ Con `--skip-install`, cada extensión no puede instalar lo suyo; se hornea a pro
 | Depth/Pose | `easy-dwpose` con `--no-deps` (no pincha numpy / huggingface_hub viejos) |
 | Dynamic prompts | `dynamicprompts` + `send2trash` **sin** extras MagicPrompt (evitarían `transformers[torch]` y pisarían torch) |
 | RemBG | `rembg==2.0.87` (su `install.py` pide 2.0.50, que no existe para Py3.13) + `jsonschema`/`pooch`/`pymatting`/`scikit-image`; no pisa `onnxruntime-gpu` |
+| RemBG en imágenes antiguas | Si la imagen no lo trae, el entrypoint lo instala una vez en `DATA_PATH/packages/rembg-venv` y lo expone por `PYTHONPATH`; no-op en arranques posteriores. `INSTALL_REMBG=0` lo desactiva |
 | RemBG en 8 GB | `forge-neo-rembg-cpu` (builtin) fuerza CPU y cachea sesiones: con `--lowvram` la VRAM libre no da para el arena de CUDA. `REMBG_PROVIDER=gpu` para revertir |
 | Builtin Neo | ultralytics, sqlalchemy, etc.; boto3 y aliyun-python-sdk (traductores AWS/Aliyun de Prompt All-in-One) |
 | Stack base | xformers, Flash Attention, onnxruntime-gpu (salvo slim), FFmpeg |

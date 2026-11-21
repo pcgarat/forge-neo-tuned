@@ -28,6 +28,55 @@ pgid="${PGID:-1000}"
 video_gid="${VIDEO_GID:-44}"
 render_gid="${RENDER_GID:-992}"
 
+# rembg (quitar fondo): el Dockerfile lo hornea, esto solo cubre imágenes publicadas
+# antes de ese cambio. Si falta, se instala en un venv persistente del volumen y se
+# añade por PYTHONPATH. El venv usa --system-site-packages para arrastrar únicamente
+# lo que falta (rembg + jsonschema/pooch/pymatting/scikit-image, ~50 MB): no toca
+# numpy/pillow/scipy de la imagen y el siguiente arranque no pisa nada. Se paga una
+# vez; tras recrear el contenedor la comprobación es local y no depende de PyPI.
+# INSTALL_REMBG=0 lo desactiva (volumen de solo lectura o sin red).
+rembg_version="${REMBG_VERSION:-2.0.87}"
+rembg_venv="$data_dir/packages/rembg-venv"
+
+rembg_missing() {
+  ! python -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("rembg") else 1)'
+}
+
+# El venv del volumen ya sirve: no hay que reinstalar nada (ni tocar PyPI).
+rembg_venv_ready() {
+  [ -x "$rembg_venv/bin/python" ] \
+    && "$rembg_venv/bin/python" -c 'import rembg' >/dev/null 2>&1
+}
+
+if [ "${INSTALL_REMBG:-auto}" != "0" ] && rembg_missing && ! rembg_venv_ready; then
+  # rembg hace sys.exit(1) sin backend ONNX: inútil en BUILD_SLIM (sin onnxruntime).
+  if ! python -c 'import onnxruntime' >/dev/null 2>&1; then
+    echo "[deps] onnxruntime ausente (BUILD_SLIM): se omite rembg"
+  elif [ "$(id -u)" -ne 0 ]; then
+    echo "[deps] AVISO: rembg falta y sin root no se puede instalar; usa 'make build'" >&2
+  else
+    echo "[deps] rembg no está en la imagen; instalando rembg==$rembg_version en $rembg_venv"
+    mkdir -p "$data_dir/packages"
+    # Venv reutilizable: pip resuelve sin volver a bajar lo ya instalado. Un venv a
+    # medias de un intento fallido no importa rembg, así que se rehace desde cero.
+    rm -rf "$rembg_venv"
+    python -m venv --system-site-packages "$rembg_venv" >/dev/null 2>&1 || rm -rf "$rembg_venv"
+    if [ -x "$rembg_venv/bin/python" ] \
+       && "$rembg_venv/bin/python" -m pip install --quiet --no-cache-dir "rembg==$rembg_version"; then
+      chown -R "$puid:$pgid" "$rembg_venv" 2>/dev/null || true
+      echo "[deps] rembg==$rembg_version listo (venv cacheado; no se repite al reiniciar)"
+    else
+      echo "[deps] AVISO: no se pudo instalar rembg; la extensión quedará desactivada" >&2
+    fi
+  fi
+fi
+
+# Solo cuando la imagen no lo trae: el venv aporta rembg y las deps que faltaban.
+if [ -x "$rembg_venv/bin/python" ] && rembg_missing \
+   && rembg_site="$("$rembg_venv/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])' 2>/dev/null)"; then
+  export PYTHONPATH="$rembg_site${PYTHONPATH:+:$PYTHONPATH}"
+fi
+
 if [ "$(id -u)" -eq 0 ]; then
   # No hacer chown -R de todo DATA_PATH (incluye Models enormes).
   # Solo rutas que Forge escribe en runtime + leftovers root.
