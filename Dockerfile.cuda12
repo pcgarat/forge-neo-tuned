@@ -26,7 +26,7 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.13 1
 RUN python3.13 -m ensurepip --upgrade
 
 # Pin de Forge Neo compatible con patches/krea2-features-backend.patch (ver patches/README.md).
-ARG FORGE_NEO_REF=41359cd4b8b89212b3dbad8c9af719160a12ed63
+ARG FORGE_NEO_REF=5998fb39ea347dfe3a72a8ec88a971e909ed8738
 
 # SageAttention opcional (ver Dockerfile principal y docs/attention-backends_09-10-2026.md).
 # En la variante CUDA 12 se instala el wheel +cu12, compilado contra CUDA 12.x.
