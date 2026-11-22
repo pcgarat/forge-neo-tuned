@@ -21,22 +21,28 @@ conclusión cerrada.
 | Perfil de partida: `--lowvram` + TE en CPU + v1.2 | 8 | **145,6 s** | 5,1 GB |
 | + TE en GPU | 8 | 35,2 s | 4,9 GB |
 | + V2 r64 + `ref_boost` 2 | 8 | 31,0 s | 4,3 GB |
-| **+ distill 4-step → receta final** | **4** | **19,9 s** | 5,4 GB |
+| + distill 4-step (receta base) | 4 | 19,9 s | 5,4 GB |
+| **+ SPEED a 832 px** | **4** | **~13 s** (1,67× sobre 21,0 s a 832) | — |
 
-**7,3× más rápido** que el punto de partida, con calidad igual o mejor que el baseline v1.2
-(más detalle y nitidez, brillo estable, sin artefactos). 0 OOM en todas las configuraciones.
+**≈11× más rápido** que el punto de partida a 832 px, con calidad igual o mejor que el baseline
+v1.2 (más detalle y nitidez, brillo estable, sin artefactos). 0 OOM en todas las configuraciones.
 
-Las tres palancas, por orden de impacto:
+Las cuatro palancas, por orden de impacto:
 
 1. **Dónde corre el text encoder: 4,1×.** Con `--lowvram`, `text_encoder_device()` devuelve
    **CPU** y el Qwen3-VL (5,3 GB fp8) hace el prefill de la imagen de referencia en CPU.
-2. **Destilación a 4 pasos: 1,70×.** Se compone con V2 sin interferencias.
-3. **V2 del LoRA + boost 2: 1,15×** y, sobre todo, **exposición estable** (v1.2 se destrozaba con
+2. **SPEED (primeros pasos a media resolución): 1,67× a 832 px, 1,91× a 1024 px.** Exige
+   configuración manual; por defecto no hace nada (ver P12).
+3. **Destilación a 4 pasos: 1,70×.** Se compone con V2 sin interferencias.
+4. **V2 del LoRA + boost 2: 1,15×** y, sobre todo, **exposición estable** (v1.2 se destrozaba con
    boost 2; V2 no).
 
 Lo que **no** funciona, medido y descartado: W4A8 (−28 % de velocidad, misma calidad), la
-variante "segura" 0,75+boost 2 con v1.2 (revienta la exposición) y desactivar el vision nativo de
-Qwen3-VL.
+variante "segura" 0,75+boost 2 con v1.2 (revienta la exposición), `Euler a` (AssertionError con
+Krea 2), el scheduler `Turbo` (brillo 112) y desactivar el vision nativo de Qwen3-VL.
+
+Gratis y recomendado: **scheduler `beta`** (indistinguible de `simple` pero es la recomendación
+de la comunidad) o **`Karras`** si se busca +35 % de detalle.
 
 Corolario crítico: **antes de optimizar nada hay que medir con el TE en GPU y con el LoRA
 activo.** Sin lo primero, un factor 4 domina todo; sin lo segundo, se mide un camino que no es
@@ -174,8 +180,8 @@ Ordenado por impacto esperado. "Estado" = qué sabemos ya; "Decisión" = qué ha
 | P9 | `ref_boost` y el bias denso L×L | ~10 % (se diluye con LoRA) | Medido |
 | P9b | Bias de atención disperso | 20–50 % en alta resolución | Idea de implementación |
 | P10 | Backend de atención con máscara (CK vs SDPA) | 1,5–2× | Medido en microbench: CK gana |
-| P11 | Caché de pasos (TeaCache / FBC / Spectrum) | 1,3–1,9× | Soporte Krea 2 incierto |
-| P12 | SPEED (primeros pasos a media resolución) | 1,25–1,33× | Pendiente |
+| P11 | Caché de pasos (TeaCache / FBC / Spectrum) | sin soporte Krea 2 en Forge | **Descartado** (P11) |
+| P12 | SPEED (primeros pasos a media resolución) | **1,67–1,91×** | **Medido** (P12): segunda palanca |
 | P13 | Pre-encode del source antes del sampling | evita thrashing | Verificado en el patch |
 | P14 | Auto face-ref prep (2 pasadas anidadas) | ×3 coste | Medido conceptualmente |
 | P15 | Caché de condicionamiento entre generaciones | variable | Pendiente |
@@ -598,22 +604,73 @@ el margen de CK crece.
 Sage está descartado para esta GPU (su path `auto` elige FP8, inestable en sm89; ver
 `docs/attention-backends_09-10-2026.md`).
 
-### P11 — Caché de pasos
+### P11 / P12 — Caché de pasos y SPEED (medido: SPEED gana)
+
+**SPEED (spectral progressive diffusion) funciona con Krea 2 y es la segunda palanca más grande.**
+Port de [aoleg/ComfyUI-SPEED](https://github.com/aoleg/ComfyUI-SPEED) (rama `main`, ya con Krea 2):
+corre los primeros pasos a media resolución latente y expande espectralmente al final.
+
+| Caso | Sin SPEED | Con SPEED | Ganancia |
+|---|---|---|---|
+| 832×832, 4 pasos, semilla 777 | 35,2 s | **21,0 s** | **1,67×** |
+| 1024×1024, 4 pasos, semilla 5150 | 51,9 s | **27,1 s** | **1,91×** |
+
+Calidad: prácticamente idéntica. A igual semilla, L1 de **2,1** (832 px) y **1,7** (1024 px),
+detalle −5 % y brillo −1,4. La ganancia **crece con la resolución**, como era de esperar: el
+75 % de los pasos corre a la mitad de lado (4× menos píxeles).
+
+**Cómo hay que configurarlo (importante, no es plug-and-play):**
+
+```python
+# siempreon_scripts -> "speed (spectral progressive diffusion)"
+[True, "dct", "manual", "krea-2", "0.5,1.0", True, 0.05, 1.0,
+ "0.55",          # manual_sigmas: umbral de transición
+ 203.615097, 1.915461, -1, False,
+ False, 4.5, "turbo", True, "seed"]
+```
+
+Dos trampas encontradas por el camino, ambas silenciosas:
+
+1. **`mode="neo_shift"` no vale**: el código solo acepta `delta_optimal` o `manual`; con
+   `neo_shift` cae en `ValueError` o en un plan sin transiciones.
+2. **El umbral hay que calibrarlo, o no hace nada.** Con `620` (mi primer intento) el log dice
+   `schedule starts at sigma 1.0000, at or below the transition's sigma 620 → dropping it` y
+   `transitions: none`: la imagen sale **bit-idéntica** (L1 = 0,0) y **más lenta**, sin ningún
+   error visible. El umbral tiene que caer **dentro** del schedule (sigma 1,0 → 0,40 con 4 pasos);
+   con `0.55` se queda en `3/4 steps coarse (75 %), 1 at full resolution`.
+
+**Caché de pasos (TeaCache / FirstBlockCache / Spectrum):** siguen **sin soporte declarado de
+Krea 2**. `sd_forge_spectrum` está horneado y expuesto por API, pero su lista de modelos es
+SD1.5/2/XL/Flux/SD3/Chroma. En ComfyUI existe `ComfyUI-Krea2-Accel` (1,3–2×) que no tiene
+equivalente en Forge. **No se prueba más**: SPEED ya da más ganancia (1,7–1,9×) con una base
+espectral y sin caché aproximada.
+
+> **Riesgo a valorar:** SPEED **cambia la composición** (así lo reporta la comunidad y así lo
+> confirma que a distinta semilla la imagen difiere algo más). Para edición con identidad, donde
+> la instrucción manda, es aceptable; para re-generar una imagen concreta, no.
+
+#### Scheduler: `beta` y `Karras` (gratis)
+
+Con la receta final, mismos 4 pasos y misma semilla:
+
+| Scheduler | Tiempo | Detalle (HF) | Brillo | L1 vs Simple |
+|---|---|---|---|---|
+| Simple | 36,1 s | 3086 | 68,8 | — |
+| **beta** | 35,2 s | 3070 | 67,9 | 1,49 |
+| **Karras** | 35,2 s | **4167** | 79,8 | 21,06 |
+| Turbo | 35,2 s | 2935 | **112,3** | 83,12 |
+
+- **`beta` ≈ `simple`** (L1 1,49): indistinguible, pero es la recomendación de quien más ha
+  probado Krea 2 en Forge. Gratis adoptarlo.
+- **`Karras` sube el detalle un 35 %** y visualmente sale más nítido sin artefactos, a cambio de
+  +11 de brillo. Es la opción si se busca textura; hay que vigilar la exposición.
+- **`Turbo` revienta la imagen** (brillo 112, L1 83): descartado.
+- **`Euler a` no funciona con Krea 2**: `AssertionError` en el denoiser CFG de Forge. Descartado.
 
 `TeaCache`/`FirstBlockCache` (`sd-forge-blockcache`, `sd_forge_spectrum`) **no declaran soporte de
 Krea 2**: están listados para SD1.5/2/XL/Flux/SD3/Chroma. En ComfyUI existe un port específico
-(`ComfyUI-Krea2-Accel`) con 1,3–2× y **más ganancia cuanto menos VRAM** (porque evita mover pesos),
-que es exactamente nuestro caso. En Forge hay que verificar si el hook `process_before_every_sampling`
-funciona con la arquitectura Krea 2; la prueba de hoy con Spectrum no llegó a ejecutarse por API
-(`Script not found`), así que queda pendiente por UI.
-
-**Potencial alto en 8 GB** (combinaría con P1), pero es el punto con más incertidumbre técnica.
-
-### P12 — SPEED (media resolución al principio)
-
-[Port a Forge Neo](https://github.com/aoleg/ComfyUI-SPEED/tree/SwarmNeo): primeros pasos a 0,5× de
-resolución, ~1,25–1,33× y menos artefactos anatómicos. Cambia la composición. Encaja bien porque en
-nuestro caso el coste por paso domina.
+(`ComfyUI-Krea2-Accel`) con 1,3–2× que no tiene equivalente en Forge. Dado que SPEED ya da
+1,7–1,9× con base espectral (no caché aproximada), **no se persigue**.
 
 ### P13 — Pre-encode del source
 
@@ -742,7 +799,9 @@ pesos bf16/fp16. Mantenerlo oscurece qué está haciendo el perfil. Se puede ret
 7. **P7** — V2 medido; queda el `general_edit_v2` y el placement `beside` (requiere adaptar el
    detector de la extensión o migrar a Neo ≥2.31).
 8. **P10/P9b** — Solo si se decide mantener el fork del patch: bias disperso.
-9. **P11/P12** — Caché de pasos (incierto) y SPEED (cambia composición).
+9. **P12** — **Medido**: SPEED da **1,67× a 832 px y 1,91× a 1024 px** con calidad casi idéntica.
+   Requiere configuración manual (`mode=manual` + umbral calibrado) o no hace nada.
+10. **P11** — **Descartado**: la caché de pasos no soporta Krea 2 en Forge; SPEED ya cubre más.
 10. **P18** — Auto-attach de `sd-forge-krea2`: parchear `_find_krea2_modules()` para aceptar VAE
     `krea2`/`krea` y respetar la selección explícita. **Prioridad alta**: bloquea el arranque.
 11. **P5** — **Medido**: el TE oficial es más nítido pero inestable en exposición (±14 de brillo entre
