@@ -157,8 +157,16 @@ Está instalado en `EXTENSIONS_PATH`, en el accordion **"speed (spectral progres
 | **Manual sigmas** | **`0.55`** ← el umbral crítico |
 
 > **Si la imagen sale idéntica y tarda igual, SPEED no se aplicó.** Mira el log: si dice
-> `transitions: none`, el umbral está fuera del schedule. Con `0.55` debe decir
-> `schedule split: 3/4 steps coarse (75%), 1 at full resolution`.
+> `transitions: none`, el umbral está fuera del schedule.
+>
+> **Calibración del umbral (medido con 4 pasos):** el valor es un *punto de corte* del schedule, no
+> un porcentaje. Con `0.55` el split es `3/4 steps coarse (75 %), 1 at full resolution` (21,4 s);
+> con `0.85` baja a `2/4 steps coarse (50 %)` y tarda 26,3 s — **funciona, pero deja 5 s (20 %) sin
+> ganar**. El umbral tiene que caer dentro del schedule (sigma 1,0 → 0,40 con 4 pasos): cuanto más
+> bajo, más pasos en la pasada rápida.
+
+> `Delta`, `Sigma divisor`, `Spectrum A/B` y `Adaptive delta` **no se leen en modo `manual`**: sus
+> valores dan igual. `Sigma divisor` solo aplica a `neo_shift`, que no es válido con Krea 2.
 
 **Coste:** cambia ligeramente la composición. Para editar sobre una foto es aceptable; para
 reproducir una imagen concreta, no.
@@ -177,6 +185,7 @@ reproducir una imagen concreta, no.
 | `AssertionError` al muestrear | Has elegido `Euler a` | Usa `Euler` |
 | OOM a 1536 px | El bias de referencia crece con la resolución | Baja a 1280 px o menos |
 | SPEED no cambia nada | `mode` no es `manual` o el umbral es alto | Ver sección 6 |
+| SPEED gana poco | `Manual sigmas` demasiado alto (p. ej. 0.85 deja el split al 50 %) | Baja a `0.55` y comprueba `75 %` en el log |
 
 ---
 
