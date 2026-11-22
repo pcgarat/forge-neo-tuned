@@ -34,7 +34,7 @@ ARG FORGE_NEO_REF=5998fb39ea347dfe3a72a8ec88a971e909ed8738
 ARG INSTALL_SAGE=0
 
 WORKDIR /app
-COPY patches/krea2-features-backend.patch patches/qwen35-vision-attention-fix.patch patches/cmd-flags-numeric-types.patch /tmp/
+COPY patches/krea2-features-backend.patch patches/qwen35-vision-attention-fix.patch patches/cmd-flags-numeric-types.patch patches/wan-i2v-no-resize.patch /tmp/
 RUN git clone --filter=blob:none --no-checkout https://github.com/Haoming02/sd-webui-forge-classic webui \
     && cd webui \
     && git fetch --depth 1 origin "${FORGE_NEO_REF}" \
@@ -42,7 +42,8 @@ RUN git clone --filter=blob:none --no-checkout https://github.com/Haoming02/sd-w
     && git apply --verbose /tmp/krea2-features-backend.patch \
     && git apply --verbose /tmp/qwen35-vision-attention-fix.patch \
     && git apply --verbose /tmp/cmd-flags-numeric-types.patch \
-    && rm -f /tmp/krea2-features-backend.patch /tmp/qwen35-vision-attention-fix.patch /tmp/cmd-flags-numeric-types.patch \
+    && git apply --verbose /tmp/wan-i2v-no-resize.patch \
+    && rm -f /tmp/krea2-features-backend.patch /tmp/qwen35-vision-attention-fix.patch /tmp/cmd-flags-numeric-types.patch /tmp/wan-i2v-no-resize.patch \
     && rm -rf .git
 
 WORKDIR /app/webui

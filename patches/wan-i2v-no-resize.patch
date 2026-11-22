@@ -1,0 +1,30 @@
+diff --git a/backend/diffusion_engine/wan.py b/backend/diffusion_engine/wan.py
+index 4c1bd1e7..2f39bf7b 100644
+--- a/backend/diffusion_engine/wan.py
++++ b/backend/diffusion_engine/wan.py
+@@ -4,7 +4,7 @@ from huggingface_guess import model_list
+ from backend import memory_management
+ from backend.args import dynamic_args
+ from backend.diffusion_engine.base import ForgeDiffusionEngine, ForgeObjects
+-from backend.misc.image_resize import adaptive_resize, resize_reference
++from backend.misc.image_resize import adaptive_resize
+ from backend.patcher.clip import CLIP
+ from backend.patcher.unet import UnetPatcher
+ from backend.patcher.vae import VAE
+@@ -84,7 +84,15 @@ class Wan(ForgeDiffusionEngine):
+         if frame is None:
+             raise SystemError("No images passed to Wan I2V...?")
+ 
+-        frame = resize_reference(frame)
++        # Parche docker-neo: no aplicar `resize_reference` al frame de condición.
++        # Esa función acota el lado máximo a `opts.reference_max_side` (1024) para las
++        # referencias de img2img/ImageStitch. Aplicada al conditioning de un I2V, amplía
++        # casi cualquier entrada (640x480 -> 1184x880) con `mode="area"`, que al ampliar
++        # equivale a nearest: el VAE codifica ese frame ampliado y `adaptive_resize` lo
++        # baja después a la forma del latente, de modo que la condición pierde detalle
++        # antes de entrar al modelo. El tope de 1024 px no tiene sentido aquí: el frame
++        # condiciona a la resolución de salida que pida el usuario, no a un límite de
++        # referencia.
+         h, w = frame.shape[-2:]
+ 
+         if self.start_image is not None:

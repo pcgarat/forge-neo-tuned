@@ -234,13 +234,13 @@ forge-check:
 	trap 'rm -rf "$$tmp"' EXIT; \
 	git clone -q --filter=blob:none --no-checkout https://github.com/Haoming02/sd-webui-forge-classic "$$tmp/neo" || exit 1; \
 	cd "$$tmp/neo" && git fetch -q --depth 1 origin "$$ref" && git checkout -q FETCH_HEAD || exit 1; \
-	for p in krea2-features-backend qwen35-vision-attention-fix cmd-flags-numeric-types; do \
+	for p in krea2-features-backend qwen35-vision-attention-fix cmd-flags-numeric-types wan-i2v-no-resize; do \
 	  printf '  %-32s ' "$$p"; \
 	  if git apply --check "$(CURDIR)/patches/$$p.patch" 2>/dev/null; then echo OK; else echo FALLA; fail=1; fi; \
 	done; \
 	if [ -z "$$fail" ]; then \
-	  git apply "$(CURDIR)/patches/krea2-features-backend.patch" "$(CURDIR)/patches/qwen35-vision-attention-fix.patch" "$(CURDIR)/patches/cmd-flags-numeric-types.patch"; \
-	  for f in backend/diffusion_engine/krea.py backend/nn/krea.py backend/nn/llm/llama.py backend/text_processing/krea2_engine.py backend/attention.py backend/nn/llm/qwen35.py; do python3 -m py_compile "$$f" || exit 1; done; \
+	  git apply "$(CURDIR)/patches/krea2-features-backend.patch" "$(CURDIR)/patches/qwen35-vision-attention-fix.patch" "$(CURDIR)/patches/cmd-flags-numeric-types.patch" "$(CURDIR)/patches/wan-i2v-no-resize.patch"; \
+	  for f in backend/diffusion_engine/krea.py backend/nn/krea.py backend/nn/llm/llama.py backend/text_processing/krea2_engine.py backend/attention.py backend/nn/llm/qwen35.py backend/diffusion_engine/wan.py; do python3 -m py_compile "$$f" || exit 1; done; \
 	  echo "  py_compile OK"; \
 	else echo "  Algun parche no aplica: regenera antes de subir FORGE_NEO_REF (ver patches/README.md)"; exit 1; fi
 

@@ -8,6 +8,72 @@
 | `qwen35-vision-attention-fix.patch` | Fix (2 partes): (1) `attention_function(...)` mal llamado en visión Qwen3-VL → `TypeError: attention_flash() missing k,v,heads` (upstream lo arregló por su cuenta en `41359cd`); (2) fallback a `attention_pytorch` cuando el encoder visual corre en CPU (lowvram offload) → `NotImplementedError: flash_attn::_flash_attn_forward ... 'CPU' backend`. |
 | `qwen35-vision-attention-fix-2.29.1.patch` | Versión anterior del anterior, para Neo `41359cd…`. |
 | `cmd-flags-numeric-types.patch` | Fix `/sdapi/v1/cmd-flags` (HTTP 500 `ResponseValidationError`): `FlagsModel` tipa cada flag como `type(default)` y los numéricos con `default=None` (`--port`, `--reserve-vram`, `--cuda-stream`) quedan como `str | None`; se relajan a `Any` esos campos. Ver `docs/attention-backends_09-10-2026.md`. |
+| `wan-i2v-no-resize.patch` | Quita el `resize_reference(frame)` que 2.33 introdujo en `Wan.image_to_video` (`caaa2cca`). Esa función acota el lado máximo a `opts.reference_max_side` (1024) para referencias de img2img/ImageStitch; aplicada al conditioning de un I2V **amplía** el frame (`mode="area"` == nearest al ampliar) y luego `adaptive_resize` lo baja al latente. Medido: +46 % de detalle fino en el vídeo resultante. Ver "Wan I2V: resize de condición" abajo. |
+
+---
+
+# Wan I2V: resize de condición
+
+## Contexto
+
+Al pasar a 2.33 se reportaron vídeos I2V notablemente más borrosos. `caaa2cca` ("references", 12 nov)
+reescribió `Wan.image_to_video` y añadió `frame = resize_reference(frame)` antes de codificar la condición.
+`resize_reference` nació para el flujo de *referencias*: reduce la imagen de referencia a
+`opts.reference_max_side` (1024 por defecto). En un I2V la condición suele ser **menor** que 1024, así que
+la función la **amplía**:
+
+```
+cond 480x640  → resize_reference (default 1024) → 880x1184   (x1.83)
+                     ↓ VAE encode
+latente 110x148 → adaptive_resize("bilinear") → 60x80         (salida 480x640)
+```
+
+`mode="area"` al **ampliar** equivale a `nearest` (verificado: `interpolate(x, size=2x, mode="area")` es
+idéntico a `mode="nearest"`), así que el frame ampliado no aporta información — solo cuesta VRAM. Además
+2.33 añadió el reescalado condicional `if image.shape[-2:] != tuple(latent_shape[-2:]): adaptive_resize(...,
+"bilinear", "disabled")`, que se ejecuta siempre que la condición no coincide con la resolución de salida.
+
+## Impacto medido (A/B con vídeo real)
+
+Misma imagen, prompt, semilla y ajustes; única variable: el parche. Nitidez = mediana de
+`|laplaciano| / |brillo|` sobre los frames (normalizada por contraste, para que no dependa de la escena).
+
+| config | nitidez |
+|--------|---------|
+| 2.33 sin parche | 1.51 |
+| 2.33 con parche | **2.21** (+46 %) |
+
+Descartados por A/B, sin efecto medible: orientación 640x480 vs 480x640, refiner HN→LN, atención
+Comfy-Kitchen INT8 vs fp16, y el propio latente de condición (el VAE real no pierde detalle en ese camino:
+HF 0.187 → 0.196).
+
+## Pero no era la causa principal
+
+El factor dominante del "se ve borroso" resultó ser **la nitidez de la imagen de entrada**, no Forge. Con
+la misma receta, cambiando solo la condición:
+
+| imagen de condición | nitidez de entrada | nitidez del vídeo |
+|---------------------|--------------------|-------------------|
+| imagen blanda del usuario | 4.32 | **2.21** |
+| primer frame de un vídeo nítido | 8.85 | **5.25** |
+
+Wan 2.2 I2V a 4 pasos, CFG 1 y denoise 1.0 no inventa detalle: el latente inicial se descarta y el frame
+entra solo como `concat_latent`, así que la salida hereda la nitidez de la condición. Con denoise < 1 sí
+se conserva detalle, pero el vídeo deja de ser coherente (no hay movimiento real). Para vídeo de calidad
+conviene generar la condición a 1280+ con un modelo de imagen y bajarla después a la resolución de vídeo.
+
+## Arreglo
+
+`wan-i2v-no-resize.patch` elimina la llamada y el import (que queda sin uso). El tamaño del vídeo no lo fija
+`resize_reference` sino `p.width/p.height` y el latente, así que el resto del pipeline no cambia.
+
+**Alternativa sin rebuild:** poner `Settings → Maximum Side Length for Reference Images` a `0`
+(`opts.reference_max_side = 0` hace que `resize_reference` devuelva el tensor intacto). Evita el resize pero
+es un ajuste global que también desactiva el tope en las referencias de img2img/ImageStitch; el parche solo
+afecta a Wan I2V y además elimina el import muerto.
+
+**Verificación:** `make forge-check` aplica los 4 parches y compila los 7 ficheros resultantes.
+El smoke test real necesita GPU: `make build && make wan`, generar un I2V y comparar nitidez.
 
 ---
 
