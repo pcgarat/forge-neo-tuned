@@ -40,3 +40,5 @@ tiempo baja ~3x. El benchmark lo verifica en el log y aborta si no se cargó.
 | VAE-krea2Real-recheck | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 23.96, 23.91, 24.02 | 23.96 | 5.44 | 0 |
 | estado-final-verificado | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 24.24, 23.86, 23.81 | 23.86 | 5.47 | 0 |
 | estado-final-post-SPEED | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 23.87, 23.58 | 23.72 | 5.53 | 0 |
+| P9b-boost2 | identity-edit | 640x640 | 4 | 768 | 2 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 23.88, 23.70, 35.06 | 23.88 | 5.41 | 0 |
+| P9b-boost4 | identity-edit | 640x640 | 4 | 768 | 4 | krea2_identity_edit_v2_r64, krea2_turbo_4step_rank_64_lora | cuda | 23.64, 23.70, 64.23 | 23.70 | 5.44 | 0 |

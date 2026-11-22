@@ -177,8 +177,8 @@ Ordenado por impacto esperado. "Estado" = qué sabemos ya; "Decisión" = qué ha
 | P5 | TE: fp8 / int8_convrot / bf16 / abliterated | velocidad igual; el oficial es **inestable** | **Medido** (P5): abliterado por estabilidad |
 | P6 | VAE: oficial vs RealVAE vs HD | **0 % de tiempo; cambia el acabado** | **Medido** (P6) |
 | P7 | LoRA: r64 / full / V2 + placement | **V2 1,15× más rápido y más estable** | **Medido** (P7); placement pendiente || P8 | Distill 4-step (y 3-step) | **1,70×**; pierde 1–10 % de detalle | **Medido** (P8) |
-| P9 | `ref_boost` y el bias denso L×L | ~10 % (se diluye con LoRA) | Medido |
-| P9b | Bias de atención disperso | 20–50 % en alta resolución | Idea de implementación |
+| P9 | `ref_boost` y el bias denso L×L | **0 % de tiempo**; 351 MB a 1280 px | **Medido** (P9): se queda |
+| P9b | Bias de atención disperso | **no viable sin tocar el kernel** | **Analizado**: 3 vías descartadas |
 | P10 | Backend de atención con máscara (CK vs SDPA) | 1,5–2× | Medido en microbench: CK gana |
 | P11 | Caché de pasos (TeaCache / FBC / Spectrum) | sin soporte Krea 2 en Forge | **Descartado** (P11) |
 | P12 | SPEED (primeros pasos a media resolución) | **1,67–1,91×** | **Medido** (P12): segunda palanca |
@@ -583,23 +583,65 @@ pesos v1.2.**
 > (más rápido, menos fiel) y repetir el barrido de `ref_boost` (2/3/4/5) con **V2**, donde la
 > recomendación del autor sí aplica.
 
-### P9 / P9b — `ref_boost` y el bias
+### P9 / P9b — `ref_boost` y el bias denso: analizado, se queda como está
 
-Medido ~10 % de coste. El bias se materializa como `[1,1,L,L]` completo aunque solo se rellenan las
-columnas de las referencias (≈1/3 de las claves). A L≈6.000, el `torch.zeros(L,L)` son ~72 MB por
-capa por paso y fuerza la ruta masked del kernel.
+**Coste en tiempo: cero con la receta actual.** Mismos 4 pasos y misma semilla:
 
-**Propuesta:** construir el bias ya reducido (o un tensor de sesgo por segmento) y aplicarlo solo en
-el bloque `[target rows × ref columns]`, o pasar el bias a SDPA como tensor expandido sin
-materializar. Requiere tocar `backend/nn/krea.py` del patch — evaluar si merece mantener el fork.
-Alternativa más barata: **usar `ref_boost` 2 en lugar de 4** (mitad del sesgo, mismo efecto
-cualitativo según el autor).
+| `ref_boost` | Mediana |
+|---|---|
+| 2 | 23,88 s |
+| 4 | 23,70 s |
+
+Indistinguible. Los ~10 % que se midieron al principio eran de otra configuración (8 pasos, v1.2,
+otra longitud de secuencia). Con 4 pasos el bias no es el cuello.
+
+**Coste en memoria: real y creciente.** El bias se crea **una vez** (`_ref_attn_bias`, línea 50) y
+se comparte en las 28 capas, pero es **denso `[1,1,L,L]`** aunque solo el 16–22 % sean valores
+distintos de cero:
+
+| Resolución | L | Bias denso | % no-cero |
+|---|---|---|---|
+| 640 | 3.968 | 30 MB | 16,3 % |
+| 832 | 6.176 | 73 MB | 19,2 % |
+| 1024 | 8.960 | 153 MB | 20,9 % |
+| 1280 | 13.568 | **351 MB** | 22,2 % |
+| 1536 | 19.200 | **703 MB** | — |
+
+**Se evaluaron tres alternativas y ninguna es viable:**
+
+1. **Sesgo por columna `[1,1,1,L]`** — el kernel lo acepta y es 5,3× más rápido (12,0 ms vs 64,1 ms
+   a L=8.960, ver microbenchmark abajo), **pero es incorrecto**: el bias es un **bloque**
+   (filas target × columnas ref), no una columna. Aplicarlo por columna lo extiende a las filas de
+   la referencia, que no deben tocarse. Verificado numéricamente: max|diff| 0,063, y el efecto
+   del bias es del mismo orden (0,004 de media), así que no es ruido.
+2. **`expand` con stride 0** — el kernel lo materializa igual (156 MB) y produce el mismo error que
+   la opción 1.
+3. **Mover el sesgo al score y prescindir de la máscara** — el bias entra en un **softmax global**,
+   así que no es separable por bloques; hacerlo exigiría materializar los scores
+   `[1,heads,L,L]`, que a L=8.960 son **3,7 GB**. Peor que el bias por 24×.
+
+**Veredicto: el bias denso es la opción eficiente, no un descuido.** Optimizarlo exigiría un kernel
+de atención que acepte un sesgo por bloque sin materializarlo (tipo `einsum` con paddings o el
+`FlexAttention` de PyTorch con `BlockMask`), que es trabajo de backend de Comfy-Kitchen, no de este
+patch. **No se toca.**
+
+> Microbenchmark que motivó el análisis (bf16, 24 heads, d=128, L=8.960, CK INT8):
+> sin máscara 18,7 ms / 341 MiB · `[1,1,1,L]` 12,0 ms / 342 MiB · densa `[1,1,L,L]` 64,1 ms /
+> 496 MiB. La forma de la máscara **sí** importa al kernel; lo que no hay es una forma correcta
+> más barata que la densa para este sesgo.
+
+#### Nota sobre el techo de resolución
+
+Los 351 MB a 1280 px y 703 MB a 1536 px explican por qué el OOM aparece antes de lo que sugeriría
+el tamaño del modelo: el bias crece con L². Es un candidato claro a mejora futura **si** se toca el
+backend, no a un parche local.
 
 ### P10 — Backend de atención
 
 CK INT8 gana a SDPA en todas las longitudes medidas, también con máscara (4,0 vs 12,2 ms a L=3.600).
-**No hay que cambiar nada aquí**, pero conviene re-medir cuando se toque P9b: si el bias se reduce,
-el margen de CK crece.
+**No hay que cambiar nada aquí.** El microbenchmark de P9b confirma además que CK respeta la
+forma de la máscara: con `[1,1,1,L]` baja a 12,0 ms y con la densa sube a 64,1 ms a L=8.960, así
+que el coste viene del **tamaño** de la máscara y no del kernel.
 
 Sage está descartado para esta GPU (su path `auto` elige FP8, inestable en sm89; ver
 `docs/attention-backends_09-10-2026.md`).
@@ -798,7 +840,9 @@ pesos bf16/fp16. Mantenerlo oscurece qué está haciendo el perfil. Se puede ret
    (1280 px estable, 1536 px OOM limpio en 2 s).
 7. **P7** — V2 medido; queda el `general_edit_v2` y el placement `beside` (requiere adaptar el
    detector de la extensión o migrar a Neo ≥2.31).
-8. **P10/P9b** — Solo si se decide mantener el fork del patch: bias disperso.
+8. **P9b** — **Analizado y descartado**: el bias denso es la opción eficiente. Las tres alternativas
+   fallan (columna = incorrecta, expand = materializa igual, score = 3,7 GB). Solo mejorable en el
+   kernel de Comfy-Kitchen.
 9. **P12** — **Medido**: SPEED da **1,67× a 832 px y 1,91× a 1024 px** con calidad casi idéntica.
    Requiere configuración manual (`mode=manual` + umbral calibrado) o no hace nada.
 10. **P11** — **Descartado**: la caché de pasos no soporta Krea 2 en Forge; SPEED ya cubre más.
