@@ -16,8 +16,16 @@ PORT     = 7860
 #   auto (def)  detecta por nvidia-smi: >=20 GB highvram, >=12 GB normalvram, resto 8 GB.
 #   8gb         fuerza el perfil 8 GB (lowvram + offload asíncrono).
 #   normal|high fuerza normalvram / highvram.
+# TE: dónde corre el text encoder (--text-enc-device).
+#   auto (def)  sin flag: Forge decide. Con --lowvram -> CPU (barato para texto, caro para visión).
+#   gpu         --text-enc-device cuda. Con referencias (Moodboard/Identity Edit) el prefill de la
+#               imagen deja de hacerse en CPU: medido 135 s -> 12 s en Identity Edit 640 px.
+#               Con texto solo cuesta ~1,8 s (compite con el UNet por VRAM): no lo fuerces si no
+#               hay referencias. El preset `make krea2` lo activa por defecto.
+#   cpu         fuerza CPU (equivalente a auto bajo --lowvram; útil para aislar el efecto).
 ATTN ?= flash
 VRAM ?= auto
+TE ?= auto
 # WARMUP=1 ejecuta chatbot-warmup (torch.compile) tras arrancar; lo usa `make up-interactive`.
 WARMUP ?=
 
@@ -55,12 +63,15 @@ FORGE_IMAGE_SAGE ?= forge-neo:sage
 ATTN_FLAGS = $(strip $(if $(filter ck,$(ATTN)),--use-ck-attention,$(if $(filter sage,$(ATTN)),--sage-function fp16_cuda,$(if $(filter sage-triton,$(ATTN)),--sage-function fp16_triton,))))
 # ATTN -> imagen. Sage/sage-triton requieren el wheel horneado (make build-sage).
 ATTN_IMAGE = $(if $(filter sage sage-triton,$(ATTN)),$(FORGE_IMAGE_SAGE),$(FORGE_IMAGE))
+# TE -> flag de runtime. auto no añade nada (comportamiento histórico).
+TE_FLAGS = $(strip $(if $(filter gpu,$(TE)),--text-enc-device cuda,$(if $(filter cpu,$(TE)),--text-enc-device cpu,)))
 
 .PHONY: help build build-no-cache build-cuda12 build-slim build-sage push push-cuda12 push-slim push-sage \
         forge-info forge-check \
         run up up-interactive down restart logs shell ps clean klein krea2 wan chatbot chatbot-warmup test-warmup test-rembg test-choose-profile \
         workspace seed-extensions preflight-gpu preflight-gpu-check \
         bench-attn bench-attn-sweep bench-attn-flash bench-attn-ck bench-attn-sage bench-attn-sage-triton test-bench \
+        bench-edit bench-edit-sweep test-bench-edit krea2-recipe \
         bench-offload bench-offload-sweep bench-offload-sweep-nostream bench-offload-sweep-stream test-bench-offload \
         iib-access krea2-ext krea2-depth-ext reactor-fix install-docker _launch-model
 
@@ -88,6 +99,7 @@ help:
 	@echo "  Ejes (para make run y presets):"
 	@echo "    ATTN=flash|ck|sage|sage-triton   sage* exige 'make build-sage' antes"
 	@echo "    VRAM=auto|8gb|normal|high        auto detecta por nvidia-smi"
+	@echo "    TE=auto|gpu|cpu                  dónde corre el text encoder (visión Krea 2)"
 	@echo "    STREAM=on|off                    --cuda-stream en el perfil 8 GB (medición)"
 	@echo ""
 	@echo "IMAGEN"
@@ -124,6 +136,10 @@ help:
 	@echo "  make bench-offload      Mide it/s vs resolución y MB descargados del perfil activo"
 	@echo "  make bench-offload-sweep  Compara --cuda-stream on/off (reinicia y mide)"
 	@echo "  make test-bench-offload Tests del benchmark de offload"
+	@echo "  make bench-edit         Mide Krea 2 Identity Edit (LoRA verificado en el info)"
+	@echo "  make bench-edit-sweep   Compara TE en CPU vs GPU en el mismo perfil"
+	@echo "  make test-bench-edit    Tests del benchmark de Identity Edit"
+	@echo "  make krea2-recipe       Receta optima medida + estado del contenedor"
 	@echo ""
 	@echo "PUBLICAR Y RUNPOD"
 	@echo "  make push | push-cuda12 | push-slim | push-sage   Construyen, etiquetan y suben"
@@ -164,13 +180,21 @@ _launch-model: workspace
 	$(resolve_vram); \
 	echo "  Atención: $(ATTN) $(ATTN_FLAGS)"; \
 	echo "  Imagen:   $(ATTN_IMAGE)"; \
-	export EXTRA_ARGS="$$extra $(ATTN_FLAGS)" FORGE_IMAGE="$(ATTN_IMAGE)"; \
+	echo "  TE:       $(if $(TE_FLAGS),$(TE) ($(TE_FLAGS)),auto (Forge decide))"; \
+	export EXTRA_ARGS="$$extra $(ATTN_FLAGS) $(TE_FLAGS)" FORGE_IMAGE="$(ATTN_IMAGE)"; \
 	$(COMPOSE) up -d$(if $(BENCH_DETACH),, && $(MAKE) --no-print-directory logs)
 	@if [ -n "$(WARMUP)" ]; then $(MAKE) --no-print-directory chatbot-warmup; fi
 
-# Presets por modelo: fijan el ATTN recomendado y detectan VRAM. Override con ATTN=/VRAM=.
+# Presets por modelo: fijan el ATTN recomendado y detectan VRAM. Override con ATTN=/VRAM=/TE=.
+# Krea 2 activa TE=gpu porque es el único preset que manda imágenes al text encoder de visión
+# (Moodboard/Identity Edit): en CPU el prefill de la referencia domina el tiempo (145 s -> 35 s
+# medidos en Identity Edit 640 px). Con texto solo la diferencia es de ~1,8 s en contra.
+# Scheduler beta: indistinguible de simple en nuestra medicion (L1 1,49) pero es la
+# recomendacion de la comunidad para Krea 2 Turbo; Karras da +35 % de detalle a costa de
+# +11 de brillo. El preset que aplica sampler/steps los fija el UI preset `krea`, no esto.
 klein: ATTN = flash
 krea2: ATTN = ck
+krea2: TE = gpu
 wan:   ATTN = ck
 klein krea2 wan run: _launch-model
 
@@ -367,6 +391,71 @@ bench-offload:
 
 test-bench-offload:
 	python3 -m unittest tests.test_bench_offload -v
+
+# --- Benchmark de Krea 2 Identity Edit -------------------------------------
+# Mide el edit con el LoRA activo (el benchmark lo verifica en el info y aborta si falta).
+# Requiere una imagen fuente: BENCH_EDIT_SOURCE=... o `make bench-edit` avisa y sale.
+# No reinicia nada; para comparar perfiles usa `make bench-edit-sweep`.
+# Defaults = receta optima medida (V2 r64, 4 pasos, ref_boost 2, grounding 768).
+BENCH_EDIT_ARGS      ?= --width 640 --height 640 --steps 4 --grounding-px 768 --ref-boost 2 --runs 2
+BENCH_EDIT_SOURCE    ?=
+BENCH_EDIT_REPORT    ?= docs/bench-edit_21-11-2026.md
+BENCH_EDIT_LORA      ?= krea2_identity_edit_v2_r64
+
+bench-edit:
+	@$(ENV_LOAD); \
+	data="$${DATA_PATH:-/workspace/forge-data}"; \
+	src="$(BENCH_EDIT_SOURCE)"; \
+	if [ -z "$$src" ]; then \
+	  src=$$(ls -t "$$data"/output/txt2img-images/*/*.png "$$data"/output/txt2img-images/*/*.jpeg 2>/dev/null | head -1); \
+	fi; \
+	if [ -z "$$src" ] || [ ! -f "$$src" ]; then \
+	  echo "Falta la imagen fuente: pasa BENCH_EDIT_SOURCE=<ruta> (o genera algo antes)." >&2; \
+	  exit 2; \
+	fi; \
+	echo "  Fuente: $$src"; \
+	python3 "$(CURDIR)/scripts/bench_edit.py" \
+	  --base-url "http://127.0.0.1:$(PORT)" \
+	  --container "$(SERVICE)" \
+	  --source "$$src" \
+	  --label "$${BENCH_EDIT_LABEL:-active}" \
+	  --lora "$(BENCH_EDIT_LORA)" \
+	  --out "$(CURDIR)/$(BENCH_EDIT_REPORT)" \
+	  $(BENCH_EDIT_ARGS)
+
+# Compara TE en CPU (implícito por --lowvram) vs TE en GPU sobre el mismo perfil.
+# Es la variable que domina el tiempo del edit con visión; reinicia entre ramas.
+bench-edit-sweep:
+	@$(MAKE) --no-print-directory run VRAM=8gb ATTN=ck TE=cpu BENCH_DETACH=1
+	@sleep $(BENCH_SLEEP)
+	@$(MAKE) --no-print-directory bench-edit BENCH_EDIT_LABEL=te-cpu
+	@$(MAKE) --no-print-directory run VRAM=8gb ATTN=ck TE=gpu BENCH_DETACH=1
+	@sleep $(BENCH_SLEEP)
+	@$(MAKE) --no-print-directory bench-edit BENCH_EDIT_LABEL=te-gpu
+
+test-bench-edit:
+	python3 -m unittest tests.test_bench_edit -v
+
+# Receta optima medida para Krea 2 Identity Edit en 8 GB (ver docs/guia-krea2-identity-edit).
+# Imprime lo que hay que poner en la UI y en que estado esta el contenedor.
+krea2-recipe:
+	@$(ENV_LOAD); \
+	echo "Receta optima para Krea 2 Identity Edit (medida en RTX 4060 8 GB):"; \
+	echo ""; \
+	echo "  Arranque:     make krea2        (ATTN=ck + TE=gpu)"; \
+	echo "  Checkpoint:   Krea/krea2_krea2Int4Convrot_v10Turbo"; \
+	echo "  Text encoder: Huihui-Qwen3-VL-4B-abliterated-fp8_scaled"; \
+	echo "  VAE:          krea2RealVae_v10"; \
+	echo "  LoRA edicion: krea2_identity_edit_v2_r64  (fuerza 1.0)"; \
+	echo "  LoRA 4 pasos: krea2_turbo_4step_rank_64_lora  (fuerza 1.0)"; \
+	echo ""; \
+	echo "  UI: 4 pasos - CFG 1 - Euler - beta - 768 grounding - ref_boost 2 - AR fit"; \
+	echo "  Resolucion: <=1 MP comodo; 1280 px OK; 1536 px OOM"; \
+	echo ""; \
+	echo "  Estado actual del contenedor:"; \
+	curl -s --max-time 10 "http://127.0.0.1:$(PORT)/sdapi/v1/options" 2>/dev/null \
+	  | python3 -c "import json,sys; d=json.load(sys.stdin); print('    checkpoint:', d.get('sd_model_checkpoint')); print('    modulos:   ', [x.split('/')[-1] for x in (d.get('forge_additional_modules') or [])])" \
+	  || echo "    (Forge no responde en :$(PORT))"
 
 # Compara base (flash) vs CK INT8. Requiere GPU operativa (nvidia-smi). Intervalo configurable.
 BENCH_SLEEP ?= 30

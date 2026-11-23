@@ -26,7 +26,7 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.13 1
 RUN python3.13 -m ensurepip --upgrade
 
 # Pin de Forge Neo compatible con patches/krea2-features-backend.patch (ver patches/README.md).
-ARG FORGE_NEO_REF=41359cd4b8b89212b3dbad8c9af719160a12ed63
+ARG FORGE_NEO_REF=5998fb39ea347dfe3a72a8ec88a971e909ed8738
 
 # SageAttention opcional (ver Dockerfile principal y docs/attention-backends_09-10-2026.md).
 # En la variante CUDA 12 se instala el wheel +cu12, compilado contra CUDA 12.x.
@@ -125,6 +125,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
 # gcc: Triton (flash/sage JIT) necesita un C compiler en runtime.
+# python3.13-dev: Triton compila un shim (driver.c) que incluye <Python.h>. Sin las
+# cabeceras, gcc falla con "Python.h: No such file or directory" en el primer kernel JIT.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     ffmpeg \
@@ -136,6 +138,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
     python3.13 \
     python3.13-venv \
+    python3.13-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

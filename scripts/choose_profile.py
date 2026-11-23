@@ -49,12 +49,15 @@ class Recommendation:
     vram: str = "auto"
     warmup: bool = False
     stream: bool = True
+    te: str = "auto"
     notes: list[str] = field(default_factory=list)
 
     def make_lines(self) -> list[str]:
         lines = [f"ATTN={self.attn}", f"VRAM={self.vram}"]
         if self.warmup:
             lines.append("WARMUP=1")
+        if self.te != "auto":
+            lines.append(f"TE={self.te}")
         if not self.stream:
             lines.append("STREAM=off")
         return lines
@@ -87,12 +90,25 @@ def recommend(a: Answers) -> Recommendation:
 
     rec = Recommendation(attn=attn, attn_reason=reason, warmup=a.api, stream=a.stream)
 
+    # TE=gpu solo cuando hay referencias: con texto solo el encoder en CPU es más barato
+    # (no compite con el UNet por la VRAM). Medido en Identity Edit 640 px: 135 s -> 12 s.
+    if a.model == "krea2" and a.long_sequence:
+        rec.te = "gpu"
+        rec.notes.append(
+            "TE en GPU: evita el prefill de la imagen de referencia en CPU "
+            "(Identity Edit 640 px: 135 s -> 12 s medidos)."
+        )
+    elif a.model == "krea2":
+        rec.notes.append(
+            "Sin referencias, deja el TE en CPU (auto): en GPU cuesta ~1,8 s más "
+            "porque compite con el UNet por la VRAM."
+        )
+
     if a.model == "krea2":
         rec.notes.append("No añadas --fast-fp8 (falla en Krea 2).")
         if a.long_sequence:
             rec.notes.append(
-                "Krea 2 + TE visión movido a VRAM: en 8 GB es muy justo; "
-                "usa fp8_scaled del TE y vigila la VRAM."
+                "Krea 2 + TE visión en VRAM: en 8 GB vigila la VRAM y usa fp8_scaled del TE."
             )
     if is_video and attn == "ck":
         rec.notes.append(
@@ -174,6 +190,7 @@ def format_summary(a: Answers, rec: Recommendation) -> str:
         f"  Tamaño:   lado mayor {a.resolution} px",
         f"  Atención: {rec.attn} — {rec.attn_reason}",
         f"  VRAM:     {rec.vram} (nvidia-smi decide el perfil)",
+        f"  TE:       {rec.te} (text encoder)",
         f"  Offload:  {'solapado (--cuda-stream)' if rec.stream else 'sin solapar (STREAM=off)'}",
         f"  Warmup:   {'sí' if rec.warmup else 'no'}",
     ]
@@ -181,10 +198,11 @@ def format_summary(a: Answers, rec: Recommendation) -> str:
         lines.append("Notas:")
         lines += [f"  - {note}" for note in rec.notes]
     warmup = " WARMUP=1" if rec.warmup else ""
+    te = f" TE={rec.te}" if rec.te != "auto" else ""
     stream = "" if rec.stream else " STREAM=off"
     lines += [
         "",
-        f"Arrancando con: make run ATTN={rec.attn} VRAM={rec.vram}{warmup}{stream}",
+        f"Arrancando con: make run ATTN={rec.attn} VRAM={rec.vram}{te}{warmup}{stream}",
     ]
     return "\n".join(lines)
 
